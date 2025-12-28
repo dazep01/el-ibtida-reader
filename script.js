@@ -4,7 +4,142 @@ let libraryData = [];
 let currentTab = 'home'; // 'home', 'library', 'bookmarks'
 let searchQuery = '';
 
-// Load User Preferences
+// --- INDEXEDDB SETUP ---
+const DB_NAME = 'ElIbtidaReaderDB';
+const DB_VERSION = 1;
+
+// Membuka koneksi database
+const dbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = (e) => {
+        console.error("IndexedDB error:", e);
+        reject("Gagal membuka database");
+    };
+
+    request.onsuccess = (e) => {
+        resolve(e.target.result);
+    };
+
+    // Membuat Schema jika versi DB berubah/baru
+    request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        // Store untuk Bookmarks
+        if (!db.objectStoreNames.contains('bookmarks')) {
+            db.createObjectStore('bookmarks', { keyPath: 'id' });
+        }
+        // Store untuk Reading Progress
+        if (!db.objectStoreNames.contains('progress')) {
+            db.createObjectStore('progress', { keyPath: 'id' });
+        }
+    };
+});
+
+// === STORAGE MANAGER (IndexedDB) ===
+const Storage = {
+    // Ambil semua ID bookmark
+    getBookmarks: async () => {
+        try {
+            const db = await dbPromise;
+            const tx = db.transaction('bookmarks', 'readonly');
+            const store = tx.objectStore('bookmarks');
+            const request = store.getAll();
+            
+            return new Promise((resolve) => {
+                request.onsuccess = () => {
+                    // Kembalikan array of IDs saja ['tmpd1', 'tmpd2']
+                    resolve(request.result.map(item => item.id));
+                };
+                request.onerror = () => resolve([]);
+            });
+        } catch (error) {
+            console.error("Error getBookmarks:", error);
+            return [];
+        }
+    },
+
+    // Toggle tambah/hapus bookmark
+    toggleBookmark: async (bookId) => {
+        try {
+            const db = await dbPromise;
+            const tx = db.transaction('bookmarks', 'readwrite');
+            const store = tx.objectStore('bookmarks');
+            
+            // Cek apakah sudah ada
+            const getRequest = store.get(bookId);
+            
+            getRequest.onsuccess = async () => {
+                if (getRequest.result) {
+                    // Jika ada, hapus
+                    const deleteReq = store.delete(bookId);
+                    deleteReq.onsuccess = () => {
+                        toast.show('Dihapus dari Tersimpan', 'info');
+                        renderContent(); // Re-render UI
+                    };
+                } else {
+                    // Jika belum ada, tambahkan timestamp sekarang
+                    const addReq = store.add({ id: bookId, timestamp: Date.now() });
+                    addReq.onsuccess = () => {
+                        toast.show('Ditambahkan ke Tersimpan', 'success');
+                        renderContent(); // Re-render UI
+                    };
+                }
+            };
+        } catch (error) {
+            console.error("Error toggleBookmark:", error);
+            toast.show('Gagal menyimpan bookmark', 'error');
+        }
+    },
+
+    // Ambil progress bacaan (Semua buku)
+    getProgress: async () => {
+        try {
+            const db = await dbPromise;
+            const tx = db.transaction('progress', 'readonly');
+            const store = tx.objectStore('progress');
+            const request = store.getAll();
+            
+            return new Promise((resolve) => {
+                request.onsuccess = () => {
+                    // Ubah format array menjadi object: { 'tmpd1': { chapterIndex: 1, ... } }
+                    const progressObj = {};
+                    request.result.forEach(item => {
+                        progressObj[item.id] = item.data;
+                    });
+                    resolve(progressObj);
+                };
+                request.onerror = () => resolve({});
+            });
+        } catch (error) {
+            console.error("Error getProgress:", error);
+            return {};
+        }
+    },
+
+    // Simpan progress bacaan
+    setProgress: async (bookId, chapterIndex) => {
+        try {
+            const db = await dbPromise;
+            const tx = db.transaction('progress', 'readwrite');
+            const store = tx.objectStore('progress');
+            
+            const data = {
+                id: bookId,
+                data: { 
+                    chapterIndex, 
+                    lastRead: Date.now() 
+                }
+            };
+            
+            const request = store.put(data); // put akan update jika ada, create jika baru
+            request.onerror = () => console.error("Gagal menyimpan progress");
+        } catch (error) {
+            console.error("Error setProgress:", error);
+        }
+    }
+};
+
+// === THEME MANAGER ===
 const loadPreferences = () => {
     const theme = localStorage.getItem('theme');
     if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -17,69 +152,57 @@ const toggleTheme = () => {
     localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
 };
 
-// === STORAGE MANAGER (Local Storage) ===
-const Storage = {
-    getProgress: () => JSON.parse(localStorage.getItem('elibtida_progress')) || {},
-    setProgress: (bookId, chapterIndex) => {
-        const progress = Storage.getProgress();
-        progress[bookId] = { chapterIndex, lastRead: Date.now() };
-        localStorage.setItem('elibtida_progress', JSON.stringify(progress));
-    },
-    getBookmarks: () => JSON.parse(localStorage.getItem('elibtida_bookmarks')) || [],
-    toggleBookmark: (bookId) => {
-        let bookmarks = Storage.getBookmarks();
-        if (bookmarks.includes(bookId)) {
-            bookmarks = bookmarks.filter(id => id !== bookId);
-            toast.show('Dihapus dari Tersimpan', 'info');
-        } else {
-            bookmarks.push(bookId);
-            toast.show('Ditambahkan ke Tersimpan', 'success');
-        }
-        localStorage.setItem('elibtida_bookmarks', JSON.stringify(bookmarks));
-        if (currentTab === 'bookmarks') renderContent();
-        else updateUI();
-    }
-};
-
 // === DATA LOADER ===
 async function initApp() {
     loadPreferences();
+    
+    // Tampilkan Loading State (opsional)
+    const contentArea = document.getElementById('content-area');
+    contentArea.innerHTML = `<div class="flex justify-center py-20"><div class="w-8 h-8 border-2 border-brand-main border-t-transparent rounded-full animate-spin"></div></div>`;
+
     try {
         const res = await fetch(LIBRARY_DATA_URL);
+        if (!res.ok) throw new Error('Gagal memuat library');
         libraryData = await res.json();
     } catch (err) {
-        console.error('Gagal load library:', err);
+        console.error(err);
         toast.show('Gagal memuat data buku', 'error');
+        return;
     }
+
     renderContent();
     bindEvents();
 }
 
-// === RENDER LOGIC ===
-function renderContent() {
+// === RENDER LOGIC (ASYNC) ===
+async function renderContent() {
     const contentArea = document.getElementById('content-area');
-    contentArea.innerHTML = ''; // Clear
+    contentArea.innerHTML = ''; 
 
     if (currentTab === 'home') {
-        renderHome(contentArea);
+        await renderHome(contentArea);
     } else if (currentTab === 'library') {
-        renderLibrary(contentArea);
+        await renderLibrary(contentArea);
     } else if (currentTab === 'bookmarks') {
-        renderBookmarks(contentArea);
+        await renderBookmarks(contentArea);
     }
 }
 
 // 1. HOME VIEW
-function renderHome(container) {
-    const progressData = Storage.getProgress();
+async function renderHome(container) {
+    // Ambil data progress dan bookmarks secara paralel
+    const [progressData, bookmarksList] = await Promise.all([
+        Storage.getProgress(),
+        Storage.getBookmarks()
+    ]);
     
-    // Get "Continue Reading" books (sort by most recent)
+    // Get "Continue Reading"
     const continueReading = libraryData
         .filter(book => progressData[book.id])
         .sort((a, b) => progressData[b.id].lastRead - progressData[a.id].lastRead);
 
-    // Header
-    container.innerHTML += `
+    // Header HTML
+    let html = `
         <div class="mb-8 animate-fade-in-up">
             <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-1 font-serif">Selamat Datang,</h2>
             <p class="text-gray-500 dark:text-gray-400">Mari lanjutkan petualangan membaca Anda.</p>
@@ -88,32 +211,37 @@ function renderHome(container) {
 
     // Continue Reading Section
     if (continueReading.length > 0) {
-        container.innerHTML += `
+        html += `
             <div class="flex justify-between items-end mb-4 animate-fade-in-up" style="animation-delay: 0.1s">
                 <h3 class="font-bold text-gray-800 dark:text-white">Lanjut Membaca</h3>
                 <span class="text-xs text-brand-main font-medium cursor-pointer" onclick="switchTab('library')">Lihat Semua</span>
             </div>
             <div class="flex gap-4 overflow-x-auto no-scrollbar pb-4 -mx-4 px-4 animate-fade-in-up" style="animation-delay: 0.2s">
-                ${continueReading.map(book => createCard(book, 'horizontal')).join('')}
+                ${continueReading.map(book => createCard(book, 'horizontal', bookmarksList, progressData)).join('')}
             </div>
             <div class="h-px bg-gray-200 dark:bg-white/10 my-8"></div>
         `;
     }
 
-    // Featured / New Arrivals
-    container.innerHTML += `
+    // Featured Section
+    html += `
         <div class="mb-4 animate-fade-in-up" style="animation-delay: 0.3s">
             <h3 class="font-bold text-gray-800 dark:text-white">Terbaru & Rekomendasi</h3>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-fade-in-up" style="animation-delay: 0.4s">
-            ${libraryData.map(book => createCard(book, 'grid')).join('')}
+            ${libraryData.map(book => createCard(book, 'grid', bookmarksList, progressData)).join('')}
         </div>
     `;
+
+    container.innerHTML = html;
 }
 
 // 2. LIBRARY VIEW
-function renderLibrary(container) {
-    container.innerHTML = `
+async function renderLibrary(container) {
+    // Fetch bookmarks sekali saja untuk filter jika perlu, atau cukup pass ke createCard
+    const bookmarksList = await Storage.getBookmarks();
+
+    let html = `
         <div class="flex gap-2 overflow-x-auto no-scrollbar mb-6 pb-2 animate-fade-in-up">
             ${['All', 'Fiksi', 'Romance', 'Drama', 'Thriller'].map(cat => `
                 <button onclick="filterCategory('${cat}')" class="px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition ${
@@ -124,15 +252,16 @@ function renderLibrary(container) {
             `).join('')}
         </div>
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-fade-in-up" style="animation-delay: 0.2s">
-            ${filterBooks().map(book => createCard(book, 'grid')).join('')}
+            ${filterBooks().map(book => createCard(book, 'grid', bookmarksList, {})).join('')}
         </div>
     `;
+    container.innerHTML = html;
 }
 
 // 3. BOOKMARKS VIEW
-function renderBookmarks(container) {
-    const bookmarkedIds = Storage.getBookmarks();
-    const bookmarkedBooks = libraryData.filter(b => bookmarkedIds.includes(b.id));
+async function renderBookmarks(container) {
+    const bookmarksList = await Storage.getBookmarks();
+    const bookmarkedBooks = libraryData.filter(b => bookmarksList.includes(b.id));
 
     if (bookmarkedBooks.length === 0) {
         container.innerHTML = `
@@ -149,19 +278,18 @@ function renderBookmarks(container) {
         container.innerHTML = `
             <h3 class="font-bold text-gray-800 dark:text-white mb-4 animate-fade-in-up">Koleksi Saya</h3>
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-fade-in-up">
-                ${bookmarkedBooks.map(book => createCard(book, 'grid')).join('')}
+                ${bookmarkedBooks.map(book => createCard(book, 'grid', bookmarksList, {})).join('')}
             </div>
         `;
     }
 }
 
 // === COMPONENT: BOOK CARD ===
-function createCard(book, layout) {
-    const progressData = Storage.getProgress();
+// Diubah untuk menerima `bookmarksList` dan `progressData` sebagai argumen agar performa baik
+function createCard(book, layout, bookmarksList = [], progressData = {}) {
+    const isBookmarked = bookmarksList.includes(book.id);
     const progress = progressData[book.id] || {};
-    const isBookmarked = Storage.getBookmarks().includes(book.id);
     
-    // Status Badge Logic
     let statusBadge = '';
     if(book.status === 'On Going') statusBadge = `<span class="status-badge status-ongoing">Ongoing</span>`;
     else if(book.status === 'Completed') statusBadge = `<span class="status-badge status-completed">Selesai</span>`;
@@ -233,16 +361,14 @@ function filterBooks() {
 
 function filterCategory(cat) {
     searchQuery = cat;
-    renderContent(); // Re-render library
+    renderContent();
 }
 
 function switchTab(tab) {
     currentTab = tab;
     
-    // Update UI States
     document.querySelectorAll('.nav-item, .nav-item-mobile').forEach(el => {
         const isActive = el.dataset.tab === tab;
-        // Styles for active
         if (isActive) {
             if(el.classList.contains('nav-item')) {
                 el.classList.add('bg-white', 'dark:bg-white/10', 'text-brand-main', 'dark:text-white', 'shadow-soft');
@@ -252,7 +378,6 @@ function switchTab(tab) {
                 el.classList.remove('text-gray-400');
             }
         } else {
-            // Reset styles
              if(el.classList.contains('nav-item')) {
                 el.classList.remove('bg-white', 'dark:bg-white/10', 'text-brand-main', 'dark:text-white', 'shadow-soft');
                 el.classList.add('text-gray-400', 'hover:bg-white');
@@ -296,13 +421,12 @@ function renderSearchResults(query) {
     if (filtered.length === 0) {
         results.innerHTML = `<div class="text-center text-gray-500 mt-20">Tidak ditemukan</div>`;
     } else {
-        results.innerHTML = filtered.map(book => createCard(book, 'horizontal')).join('');
+        results.innerHTML = filtered.map(book => createCard(book, 'horizontal', [], {})).join('');
     }
 }
 
 // Toast Notification
 function toast(msg, type = 'info') {
-    // Simple toast implementation
     const div = document.createElement('div');
     div.className = `fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-lg z-50 text-sm font-medium animate-fade-in-up ${
         type === 'success' ? 'bg-green-600 text-white' : 'bg-gray-800 text-white'
@@ -316,15 +440,11 @@ function toast(msg, type = 'info') {
 }
 
 function bindEvents() {
-    // Tab Switchers
     document.querySelectorAll('.nav-item, .nav-item-mobile').forEach(btn => {
         if(btn.dataset.tab) btn.onclick = () => switchTab(btn.dataset.tab);
     });
-
-    // Theme Toggles
     document.getElementById('theme-toggle-desktop').onclick = toggleTheme;
     
-    // Search
     const mobileSearchBtn = document.getElementById('search-toggle-mobile');
     const desktopSearchBtn = document.getElementById('search-toggle-desktop');
     const closeSearchBtn = document.getElementById('close-search');
