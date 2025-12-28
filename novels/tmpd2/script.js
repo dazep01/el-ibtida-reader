@@ -701,19 +701,37 @@ const textHighlighter = new TextHighlighter();
 async function initApp() {
     loadPreferences();
     try {
-        // Load data.json dari direktori yang sama
-        const novelResponse = await fetch('data.json');
+        console.log('Mencoba memuat data.json dari:', window.location.href);
         
-        if (!novelResponse.ok) {
-            throw new Error(`HTTP ${novelResponse.status}: Gagal memuat data novel`);
+        // Coba beberapa metode sebagai fallback
+        const dataPaths = [
+            'data.json',
+            './data.json',
+            window.location.pathname.replace(/script\.js$/, 'data.json')
+        ];
+        
+        let novelResponse = null;
+        for (const path of dataPaths) {
+            try {
+                novelResponse = await fetch(path);
+                if (novelResponse.ok) break;
+            } catch (e) {
+                console.log(`Gagal dengan path ${path}:`, e.message);
+            }
+        }
+        
+        if (!novelResponse || !novelResponse.ok) {
+            throw new Error(`Tidak dapat memuat data.json. Status: ${novelResponse?.status || 'no response'}`);
         }
         
         supabaseData = await novelResponse.json();
         
-        // Validasi data minimal
-        if (!supabaseData?.chapters?.length) {
-            throw new Error('Data novel tidak valid atau kosong');
+        // Validasi struktur data
+        if (!supabaseData || !supabaseData.title || !supabaseData.chapters) {
+            throw new Error('Data JSON tidak valid atau struktur tidak sesuai');
         }
+        
+        console.log('Data novel berhasil dimuat:', supabaseData.title);
         
         // Load ulasan dari JSONBin
         await reviewService.fetchReviews();
@@ -754,9 +772,23 @@ async function initApp() {
             }
         });
 
-    } catch (error) {
+        } catch (error) {
         console.error("Init Error:", error);
-        document.body.innerHTML = `<div class="p-10 text-center text-red-500">Gagal memuat aplikasi. Mohon refresh halaman.<br><small>${error.message}</small></div>`;
+        
+        // Tampilkan pesan error yang lebih user-friendly
+        const errorHtml = `
+            <div class="min-h-screen flex items-center justify-center p-6">
+                <div class="text-center max-w-md">
+                    <div class="text-red-400 text-5xl mb-4">📚</div>
+                    <h2 class="text-xl font-bold text-red-600 dark:text-red-400 mb-2">Gagal Memuat Novel</h2>
+                    <p class="text-gray-600 dark:text-gray-400 mb-4">${error.message}</p>
+                    <button onclick="location.reload()" class="px-4 py-2 bg-brand-slate text-white rounded-lg">
+                        Muat Ulang
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.innerHTML = errorHtml;
     }
 }
 
