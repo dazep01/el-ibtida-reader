@@ -14,6 +14,96 @@ let selectedRating = 0;
 let isSynopsisExpanded = false;
 let navClickListener = null;
 let pwaInstaller = null;
+// ==========================================
+// --- INDEXEDDB CONFIG (Sama dengan halaman lain) ---
+// ==========================================
+const DB_NAME = 'NovelReaderDB';
+const DB_VERSION = 1;
+
+const dbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = (e) => {
+        console.error("IndexedDB error:", e);
+        reject("Gagal membuka database");
+    };
+
+    request.onsuccess = (e) => {
+        resolve(e.target.result);
+    };
+
+    request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('bookmarks')) {
+            db.createObjectStore('bookmarks', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('progress')) {
+            db.createObjectStore('progress', { keyPath: 'id' });
+        }
+    };
+});
+
+// === STORAGE MANAGER (IndexedDB) ===
+const Storage = {
+    // Cek status bookmark untuk buku ini
+    checkBookmark: async (bookId) => {
+        try {
+            const db = await dbPromise;
+            const tx = db.transaction('bookmarks', 'readonly');
+            const store = tx.objectStore('bookmarks');
+            const request = store.get(bookId);
+            
+            return new Promise((resolve) => {
+                request.onsuccess = () => {
+                    resolve(!!request.result); // true jika ada, false jika tidak
+                };
+                request.onerror = () => resolve(false);
+            });
+        } catch (error) {
+            console.error("Error checkBookmark:", error);
+            return false;
+        }
+    },
+
+    // Toggle bookmark (sama dengan halaman lain)
+    toggleBookmark: async (bookId) => {
+        try {
+            const db = await dbPromise;
+            const tx = db.transaction('bookmarks', 'readwrite');
+            const store = tx.objectStore('bookmarks');
+            
+            const getRequest = store.get(bookId);
+            
+            getRequest.onsuccess = () => {
+                if (getRequest.result) {
+                    // Hapus bookmark
+                    store.delete(bookId);
+                    toast("Dihapus dari Tersimpan", "info");
+                    return false;
+                } else {
+                    // Tambah bookmark
+                    store.add({ 
+                        id: bookId, 
+                        timestamp: Date.now(),
+                        title: supabaseData?.title || 'Unknown Title',
+                        author: supabaseData?.author || 'Unknown Author'
+                    });
+                    toast("Ditambahkan ke Tersimpan", "success");
+                    return true;
+                }
+            };
+            
+            return new Promise((resolve) => {
+                tx.oncomplete = () => {
+                    resolve();
+                };
+            });
+        } catch (error) {
+            console.error("Error toggleBookmark:", error);
+            toast("Gagal menyimpan bookmark", "error");
+        }
+    },
+};
 
 // === TOAST SYSTEM ===
 const toast = {
@@ -212,6 +302,28 @@ const ui = {
             icon.className = 'ph ph-moon text-lg';
             navIcon.className = 'ph ph-moon text-lg';
         }
+    },
+
+    updateBookmarkIcon: () => {
+        const icon = document.getElementById('icon-bookmark');
+        if (isBookmarked) {
+            icon.classList.replace('ph-bookmark-simple', 'ph-bookmark-simple-fill');
+            icon.classList.add('text-yellow-500');
+        } else {
+            icon.classList.replace('ph-bookmark-simple-fill', 'ph-bookmark-simple');
+            icon.classList.remove('text-yellow-500');
+        }
+    },
+
+    bookmark: async () => {
+        if (!currentBookId) return;
+        
+        // Toggle di IndexedDB
+        await Storage.toggleBookmark(currentBookId);
+        
+        // Update status lokal
+        isBookmarked = !isBookmarked;
+        ui.updateBookmarkIcon();
     },
 
     toggleSynopsis: () => {
@@ -705,10 +817,17 @@ async function initApp() {
         if (!novelResponse.ok) throw new Error('Gagal memuat data novel');
         supabaseData = await novelResponse.json();
 
-        // 2. Load Ulasan dari JSONBin
+        // 2. Set currentBookId
+        currentBookId = supabaseData.id || supabaseData.title.replace(/\s+/g, '_');
+        
+        // 3. Load bookmark status
+        isBookmarked = await Storage.checkBookmark(currentBookId);
+        ui.updateBookmarkIcon(); // ← Fungsi baru untuk update icon
+
+        // 4. Load Ulasan dari JSONBin
         await reviewService.fetchReviews();
 
-        // 3. Inisialisasi UI setelah data siap
+        // 5. Inisialisasi UI setelah data siap
         ui.init();
 
         // Scroll Progress Listener
