@@ -132,7 +132,7 @@ const Storage = {
                 request.onsuccess = () => {
                     const progressObj = {};
                     request.result.forEach(item => {
-                        progressObj[item.id] = item.data;
+                        progressObj[item.id] = item.data; g
                     });
                     resolve(progressObj);
                 };
@@ -286,6 +286,44 @@ const uiController = {
         // Event Listeners
         uiController.bindEvents();
     },
+
+        renderNovelInfo() {
+        const data = this.state.novelData;
+        
+        // 1. Cek apakah data novel sudah dimuat
+        if (!data) {
+            console.warn("Data novel belum dimuat (null/undefined).");
+            return; 
+        }
+
+        // 2. Log data ke console untuk debugging (Buka Inspect Element -> Console)
+        console.log("Data Novel:", data);
+
+        // 3. Cari sinopsis secara "pintar". 
+        // JS akan mencoba 'description', jika tidak ada, coba 'synopsis', dst.
+        const synopsisText = data.description || data.synopsis || data.desc || data.sinopsis || "Sinopsis belum ditulis.";
+
+        // Update Element HTML
+        // Cek apakah element ada di DOM sebelum diubah
+        const descElement = document.getElementById('detail-desc');
+        if (descElement) {
+            descElement.innerText = synopsisText;
+            
+            // Reset state klamp (line-clamp)
+            descElement.classList.remove('line-clamp-3');
+            
+            // Tambahkan kembali line-clamp jika belum perlu dibuka (optional, sesuaikan kebutuhan Anda)
+            // descElement.classList.add('line-clamp-3'); 
+        }
+
+        // Update Judul & Penulis (Hanya untuk memastikan data masuk)
+        if (document.getElementById('detail-title')) {
+            document.getElementById('detail-title').innerText = data.title || "Judul Novel";
+        }
+        if (document.getElementById('detail-author')) {
+            document.getElementById('detail-author').innerText = data.author || "Penulis";
+        }
+    }
 
     renderChapters: async (bookmarksList = [], progressData = {}) => {
         const container = document.getElementById('chapter-list');
