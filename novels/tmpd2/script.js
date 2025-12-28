@@ -699,18 +699,18 @@ const textHighlighter = new TextHighlighter();
 
 // === INITIALIZATION (ASYNC) ===
 async function initApp() {
+    loadPreferences();
     try {
-        // 1. Load Data Novel Lokal
+        // Load data.json spesifik novel ini
         const novelResponse = await fetch('./data.json');
         if (!novelResponse.ok) throw new Error('Gagal memuat data novel');
         supabaseData = await novelResponse.json();
 
-        // 2. Load Ulasan dari JSONBin
+        // Load ulasan dari JSONBin (global config)
         await reviewService.fetchReviews();
 
-        // 3. Inisialisasi UI setelah data siap
         ui.init();
-
+        
         // Scroll Progress Listener
         const mainScroll = document.getElementById('main-scroll');
         const progressBar = document.getElementById('scroll-progress');
