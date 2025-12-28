@@ -2,9 +2,9 @@
 // --- KONFIGURASI JSONBIN ---
 // ==========================================
 // Masukkan ID Bin dari JSONBin Anda
-const JSONBIN_ID = 'GANTI_DENGAN_BIN_ID_ANDA_DISINI'; 
+const JSONBIN_ID = '69510ed743b1c97be909f342'; 
 // Masukkan API Key (Master Key atau Access Key dengan permission Write)
-const JSONBIN_KEY = 'GANTI_DENGAN_API_KEY_ANDA_DISINI'; 
+const JSONBIN_KEY = '$2a$10$gA9ADhVd/DNOsbERAMFc4u/LgJBqxy3apNZsSHxuUcKtU.ko6gAIS'; 
 // ==========================================
 
 // Variabel Global
