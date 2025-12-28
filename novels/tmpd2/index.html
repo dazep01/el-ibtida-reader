@@ -467,6 +467,12 @@
             </div>
         </section>
     </div>
+<script>
+    // Konfigurasi untuk novel ini
+    window.NOVEL_APP_CONFIG = {
+        DATA_URL: 'https://raw.githubusercontent.com/dazep01/el-ibtida-reader/main/novels/tmpd2/data.json'
+    };
+</script>
     <script>
 // ==========================================
 // NOVEL READER - Aplikasi Pembaca Novel
@@ -905,43 +911,52 @@ class DataLoader {
         }
         
         try {
-            // Try multiple potential paths
-            const paths = [
-                'data.json',
-                './data.json',
-                '../data.json',
-                window.location.pathname.replace(/[^/]*$/, '') + 'data.json'
-            ];
+            // 1. Coba dari URL parameter ?data=
+            const urlParams = new URLSearchParams(window.location.search);
+            const dataUrl = urlParams.get('data');
             
-            let data = null;
-            
-            for (const path of paths) {
-                try {
-                    const response = await fetch(path, {
-                        headers: { 'Accept': 'application/json' },
-                        signal: AbortSignal.timeout(10000)
-                    });
-                    
-                    if (response.ok) {
-                        data = await response.json();
-                        
-                        // Validate data structure
-                        if (state.validateNovelData(data)) {
-                            state.novelData = data;
-                            return data;
-                        } else {
-                            console.warn(`Data dari ${path} tidak valid`);
-                            data = null;
-                        }
+            if (dataUrl) {
+                console.log('Mengambil dari parameter URL:', dataUrl);
+                const response = await fetch(dataUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (state.validateNovelData(data)) {
+                        state.novelData = data;
+                        return data;
                     }
-                } catch (error) {
-                    // Continue to next path
-                    console.debug(`Gagal memuat dari ${path}:`, error.message);
                 }
             }
             
-            if (!data) {
-                throw new Error(CONFIG.ERRORS.INVALID_DATA);
+            // 2. Coba dari config
+            if (window.NOVEL_APP_CONFIG?.DATA_URL) {
+                console.log('Mengambil data dari:', window.NOVEL_APP_CONFIG.DATA_URL);
+                const response = await fetch(window.NOVEL_APP_CONFIG.DATA_URL);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: Gagal mengambil dari URL eksternal`);
+            }
+            
+            // 3. Fallback ke lokal
+            const paths = [
+                './data.json',
+                '../data.json',
+                'data.json',
+                window.location.pathname.replace(/[^/]*$/, '') + 'data.json'
+            ];
+            
+            for (const path of paths) {
+                try {
+                    const response = await fetch(path);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (state.validateNovelData(data)) {
+                            state.novelData = data;
+                            return data;
+                        }
+                    }
+               } catch (error) {
+                    console.warn(`Gagal dari ${path}:`, error.message);
+                }
             }
             
         } catch (error) {
@@ -950,7 +965,6 @@ class DataLoader {
         }
     }
 }
-
 // === THEME MANAGER ===
 class ThemeManager {
     static init() {
