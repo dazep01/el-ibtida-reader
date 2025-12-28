@@ -1,51 +1,171 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id" class="scroll-smooth">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hello World Aesthetic</title>
-    <link href="fonts.googleapis.com" rel="stylesheet">
-  <style>
-body {
-    /* Aesthetic dark background */
-    background-color: #121212; 
-    color: #e0e0e0; /* Light gray text for contrast */
-    font-family: 'Roboto Mono', monospace; /* A clean, monospaced font is often considered aesthetic and tech-inspired */
-    margin: 0;
-    padding: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh; /* Full viewport height */
-    text-align: center;
-}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#5b6e7b">
+    <meta name="description" content="El-Ibtida Reader - Perpustakaan Novel Digital Islami Terbaik.">
+    <title>El-Ibtida Reader</title>
+    
+    <!-- PWA -->
+    <link rel="manifest" href="./manifest.json">
+    <link rel="apple-touch-icon" href="./icons/icon-192.png">
 
-.container {
-    padding: 2rem;
-    border: 1px solid #444; /* Subtle border for definition */
-    border-radius: 8px; /* Softened corners */
-    background-color: #1e1e1e; /* Slightly lighter background for the content container */
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); /* Soft shadow for depth */
-}
+    <!-- Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
 
-h1 {
-    font-size: 3rem;
-    margin-bottom: 0.5rem;
-    color: #00bcd4; /* A pop of cyan color for the main text */
-}
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], serif: ['Playfair Display', 'serif'] },
+                    colors: {
+                        brand: { main: '#5b6e7b', dark: '#1c1c1e', surface: '#f2f4f8' },
+                        accent: { gold: '#F59E0B', red: '#EF4444' }
+                    },
+                    boxShadow: {
+                        'soft': '0 10px 40px -10px rgba(0,0,0,0.08)',
+                        'glow': '0 0 20px rgba(91, 110, 123, 0.3)'
+                    },
+                    animation: {
+                        'fade-in-up': 'fadeInUp 0.5s ease-out forwards',
+                        'skeleton': 'skeleton 1.5s infinite linear'
+                    },
+                    keyframes: {
+                        fadeInUp: { '0%': { opacity: 0, transform: 'translateY(20px)' }, '100%': { opacity: 1, transform: 'translateY(0)' } },
+                        skeleton: { '0%': { backgroundPosition: '200% 0' }, '100%': { backgroundPosition: '-200% 0' } }
+                    }
+                }
+            }
+        }
+    </script>
 
-p {
-    font-size: 1rem;
-    color: #a0a0a0;
-}
-
-  </style>
+    <!-- Styles -->
+    <link rel="stylesheet" href="./style.css">
 </head>
-<body>
-    <div class="container">
-        <h1>Hello, World!</h1>
-        <p>A simple, clean, and aesthetic start.</p>
+<body class="bg-brand-surface dark:bg-brand-dark text-slate-800 dark:text-slate-200 font-sans transition-colors duration-300 overflow-x-hidden">
+
+    <!-- Background Decoration -->
+    <div class="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <div class="absolute top-0 left-0 w-96 h-96 bg-brand-main/10 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2"></div>
+        <div class="absolute bottom-0 right-0 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl translate-x-1/2 translate-y-1/2"></div>
     </div>
+
+    <!-- App Container (Mobile Constraint on Desktop) -->
+    <div class="relative z-10 max-w-md md:max-w-4xl lg:max-w-6xl mx-auto min-h-screen flex flex-col md:p-6">
+        
+        <!-- HEADER (Desktop) -->
+        <header class="hidden md:flex justify-between items-center mb-8 px-4 py-2 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-2xl shadow-sm border border-white/20 dark:border-white/5 sticky top-6 z-50">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-brand-main text-white flex items-center justify-center shadow-lg shadow-brand-main/30">
+                    <i class="ph-bold ph-books text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-none tracking-tight text-brand-main dark:text-blue-100">El-Ibtida Reader</h1>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Perpustakaan Digital</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-4">
+                <button id="search-toggle-desktop" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 transition">
+                    <i class="ph ph-magnifying-glass text-xl"></i>
+                </button>
+                <button id="theme-toggle-desktop" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 transition">
+                    <i class="ph ph-moon text-xl dark:hidden"></i>
+                    <i class="ph ph-sun text-xl hidden dark:block text-yellow-400"></i>
+                </button>
+                <div class="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-sm">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="User" />
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN CONTENT -->
+        <main class="flex-1 px-4 pb-24 md:pb-8 relative" id="main-content">
+            
+            <!-- Mobile Header & Search -->
+            <div class="md:hidden sticky top-0 z-40 bg-brand-surface/95 dark:bg-brand-dark/95 backdrop-blur-md py-4 -mx-4 px-4 mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-brand-main text-white flex items-center justify-center shadow-lg shadow-brand-main/30">
+                            <i class="ph-bold ph-books text-xl"></i>
+                        </div>
+                        <div>
+                            <h1 class="font-bold text-base leading-none tracking-tight text-brand-main dark:text-blue-100">El-Ibtida</h1>
+                            <p class="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-widest">Library</p>
+                        </div>
+                    </div>
+                    <button id="search-toggle-mobile" class="w-10 h-10 rounded-full bg-white dark:bg-white/10 shadow-sm flex items-center justify-center active:scale-95 transition">
+                        <i class="ph ph-magnifying-glass text-lg text-brand-main"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Dynamic Content Area -->
+            <div id="content-area">
+                <!-- Will be populated by JS -->
+            </div>
+
+        </main>
+
+        <!-- DESKTOP NAVIGATION (Sidebar replacement) -->
+        <nav class="hidden md:flex flex-col gap-2 fixed left-6 top-1/2 -translate-y-1/2 z-50">
+            <button class="nav-item w-12 h-12 rounded-xl bg-white dark:bg-white/10 shadow-soft flex items-center justify-center text-brand-main dark:text-white transition hover:scale-110 active" data-tab="home">
+                <i class="ph-fill ph-house text-xl"></i>
+            </button>
+            <button class="nav-item w-12 h-12 rounded-xl hover:bg-white dark:hover:bg-white/10 flex items-center justify-center text-gray-400 dark:text-gray-500 transition hover:scale-110" data-tab="library">
+                <i class="ph ph-books text-xl"></i>
+            </button>
+            <button class="nav-item w-12 h-12 rounded-xl hover:bg-white dark:hover:bg-white/10 flex items-center justify-center text-gray-400 dark:text-gray-500 transition hover:scale-110" data-tab="bookmarks">
+                <i class="ph ph-bookmarks text-xl"></i>
+            </button>
+        </nav>
+
+        <!-- MOBILE BOTTOM NAVIGATION -->
+        <nav class="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/90 dark:bg-brand-dark/90 backdrop-blur-lg border-t border-gray-100 dark:border-white/5 pb-safe">
+            <div class="flex justify-around items-center py-3 px-2">
+                <button class="nav-item-mobile flex flex-col items-center gap-1 p-2 text-brand-main transition" data-tab="home">
+                    <i class="ph-fill ph-house text-2xl"></i>
+                    <span class="text-[10px] font-medium">Beranda</span>
+                </button>
+                <button class="nav-item-mobile flex flex-col items-center gap-1 p-2 text-gray-400 dark:text-gray-500 transition" data-tab="library">
+                    <i class="ph ph-books text-2xl"></i>
+                    <span class="text-[10px] font-medium">Koleksi</span>
+                </button>
+                <button class="nav-item-mobile flex flex-col items-center gap-1 p-2 text-gray-400 dark:text-gray-500 transition" data-tab="bookmarks">
+                    <i class="ph ph-bookmarks text-2xl"></i>
+                    <span class="text-[10px] font-medium">Tersimpan</span>
+                </button>
+                <button class="nav-item-mobile flex flex-col items-center gap-1 p-2 text-gray-400 dark:text-gray-500 transition" onclick="toggleTheme()">
+                    <i class="ph ph-moon text-2xl dark:hidden"></i>
+                    <i class="ph ph-sun text-2xl hidden dark:block text-yellow-400"></i>
+                    <span class="text-[10px] font-medium">Tema</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- SEARCH OVERLAY -->
+        <div id="search-overlay" class="fixed inset-0 z-[60] bg-brand-surface dark:bg-brand-dark transform translate-y-full transition-transform duration-300">
+            <div class="p-4 flex flex-col h-full">
+                <div class="flex items-center gap-4 mb-6">
+                    <button id="close-search" class="w-10 h-10 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center">
+                        <i class="ph ph-arrow-left text-xl"></i>
+                    </button>
+                    <input type="text" id="search-input" placeholder="Cari judul, penulis, atau genre..." 
+                           class="flex-1 bg-transparent text-xl font-bold border-none outline-none placeholder:text-gray-300 dark:text-white dark:placeholder:text-gray-600">
+                </div>
+                <div id="search-results" class="flex-1 overflow-y-auto pb-20 space-y-4">
+                    <!-- Search Results -->
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="./script.js"></script>
 </body>
 </html>
-
