@@ -59,38 +59,46 @@ const Storage = {
     },
 
     // Toggle tambah/hapus bookmark
-    toggleBookmark: async (bookId) => {
-        try {
-            const db = await dbPromise;
-            const tx = db.transaction('bookmarks', 'readwrite');
-            const store = tx.objectStore('bookmarks');
+toggleBookmark: async (bookId) => {
+    console.log('Toggle bookmark dipanggil untuk:', bookId); // DEBUG
+    try {
+        const db = await dbPromise;
+        console.log('Database connected'); // DEBUG
+        
+        const tx = db.transaction('bookmarks', 'readwrite');
+        const store = tx.objectStore('bookmarks');
+        
+        const getRequest = store.get(bookId);
+        
+        getRequest.onsuccess = () => {
+            console.log('Bookmark status:', getRequest.result ? 'Ada' : 'Tidak ada'); // DEBUG
             
-            // Cek apakah sudah ada
-            const getRequest = store.get(bookId);
-            
-            getRequest.onsuccess = async () => {
-                if (getRequest.result) {
-                    // Jika ada, hapus
-                    const deleteReq = store.delete(bookId);
-                    deleteReq.onsuccess = () => {
-                        toast.show('Dihapus dari Tersimpan', 'info');
-                        renderContent(); // Re-render UI
-                    };
-                } else {
-                    // Jika belum ada, tambahkan timestamp sekarang
-                    const addReq = store.add({ id: bookId, timestamp: Date.now() });
-                    addReq.onsuccess = () => {
-                        toast.show('Ditambahkan ke Tersimpan', 'success');
-                        renderContent(); // Re-render UI
-                    };
-                }
-            };
-        } catch (error) {
-            console.error("Error toggleBookmark:", error);
-            toast.show('Gagal menyimpan bookmark', 'error');
-        }
-    },
-
+            if (getRequest.result) {
+                store.delete(bookId);
+                console.log('Bookmark dihapus'); // DEBUG
+                toast('Dihapus dari Tersimpan', 'info');
+            } else {
+                store.add({ id: bookId, timestamp: Date.now() });
+                console.log('Bookmark ditambahkan'); // DEBUG
+                toast('Ditambahkan ke Tersimpan', 'success');
+            }
+            renderContent();
+        };
+        
+        getRequest.onerror = (e) => {
+            console.error('Error checking bookmark:', e);
+        };
+        
+        tx.oncomplete = () => {
+            console.log('Transaction completed'); // DEBUG
+        };
+        
+    } catch (error) {
+        console.error("Error toggleBookmark:", error);
+        toast('Gagal menyimpan bookmark', 'error');
+    }
+},
+    
     // Ambil progress bacaan (Semua buku)
     getProgress: async () => {
         try {
@@ -155,6 +163,15 @@ const toggleTheme = () => {
 // === DATA LOADER ===
 async function initApp() {
     loadPreferences();
+
+        // Test IndexedDB connection
+    try {
+        const db = await dbPromise;
+        console.log('IndexedDB connected successfully');
+    } catch (error) {
+        console.error('IndexedDB connection failed:', error);
+        toast('Database tidak tersedia', 'error');
+    }
     
     // Tampilkan Loading State (opsional)
     const contentArea = document.getElementById('content-area');
@@ -179,12 +196,15 @@ async function renderContent() {
     const contentArea = document.getElementById('content-area');
     contentArea.innerHTML = ''; 
 
+    // Ambil data bookmark terbaru setiap kali render
+    const bookmarksList = await Storage.getBookmarks(); // TAMBAHKAN INI
+    
     if (currentTab === 'home') {
-        await renderHome(contentArea);
+        await renderHome(contentArea, bookmarksList); // PASS SEBAGAI PARAMETER
     } else if (currentTab === 'library') {
-        await renderLibrary(contentArea);
+        await renderLibrary(contentArea, bookmarksList);
     } else if (currentTab === 'bookmarks') {
-        await renderBookmarks(contentArea);
+        await renderBookmarks(contentArea, bookmarksList);
     }
 }
 
@@ -339,7 +359,7 @@ function createCard(book, layout, bookmarksList = [], progressData = {}) {
                                 <i class="ph-fill ph-star"></i>
                                 <span class="font-medium">${book.rating}</span>
                             </div>
-                            <button onclick="event.preventDefault(); Storage.toggleBookmark('${book.id}')" class="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 transition">
+                            <button onclick="event.preventDefault(); event.stopPropagation(); Storage.toggleBookmark('${book.id}')" class="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 transition">
                                 <i class="ph ${isBookmarked ? 'ph-bookmark-simple-fill text-brand-main' : 'ph-bookmark-simple text-gray-400'} text-lg"></i>
                             </button>
                         </div>
@@ -425,11 +445,13 @@ function renderSearchResults(query) {
     }
 }
 
-// Toast Notification
-function toast(msg, type = 'info') {
+// Ganti function toast() yang ada dengan:
+const toast = (msg, type = 'info') => {
     const div = document.createElement('div');
     div.className = `fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-lg z-50 text-sm font-medium animate-fade-in-up ${
-        type === 'success' ? 'bg-green-600 text-white' : 'bg-gray-800 text-white'
+        type === 'success' ? 'bg-green-600 text-white' : 
+        type === 'error' ? 'bg-red-600 text-white' : 
+        'bg-gray-800 text-white'
     }`;
     div.innerText = msg;
     document.body.appendChild(div);
@@ -437,7 +459,7 @@ function toast(msg, type = 'info') {
         div.style.opacity = '0';
         setTimeout(() => div.remove(), 300);
     }, 2000);
-}
+};
 
 function bindEvents() {
     document.querySelectorAll('.nav-item, .nav-item-mobile').forEach(btn => {
