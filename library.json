@@ -1,0 +1,30 @@
+[
+  {
+    "id": "tmpd1",
+    "title": "Teras Masjid Para Duda #1",
+    "subtitle": "Pak Darto dan Surat yang Tak Pernah Terkirim",
+    "author": "RaaRion.",
+    "cover": "https://i.ibb.co.com/ZRd8dkL4/7-20250430-202047-0000.png",
+    "genre": "Fiksi Islami",
+    "tags": ["Romance", "Slice of Life", "Dewasa", "Drama"],
+    "description": "Pak Darto, pensiunan guru SD dan kisah cintanya yang tak pernah terkirim. Sebuah cerita hangat tentang kehilangan dan kenangan.",
+    "status": "On Going",
+    "rating": "4.8",
+    "path": "./novels/tmpd1/index.html",
+    "updatedAt": "2023-10-04"
+  },
+  {
+    "id": "tmpd2",
+    "title": "Teras Masjid Para Duda #2",
+    "subtitle": "Pak Yos dan Cinta Di Balik Stir",
+    "author": "RaaRion.",
+    "cover": "https://i.ibb.co.com/sJb3kQTj/8-20250430-202047-0001.png",
+    "genre": "Fiksi Islami",
+    "tags": ["Romance", "Slice of Life", "Dewasa", "Drama"],
+    "description": "Coming Soon.",
+    "status": "Coming Soon",
+    "rating": "4.9",
+    "path": "./novels/tmpd2/index.html", 
+    "updatedAt": "2023-09-15"
+  }
+]
