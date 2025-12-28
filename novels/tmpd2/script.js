@@ -701,14 +701,23 @@ const textHighlighter = new TextHighlighter();
 async function initApp() {
     loadPreferences();
     try {
-        // Load data.json spesifik novel ini
-        const novelResponse = await fetch('./data.json');
-        if (!novelResponse.ok) throw new Error('Gagal memuat data novel');
+        // Load data.json dari direktori yang sama
+        const novelResponse = await fetch('data.json');
+        
+        if (!novelResponse.ok) {
+            throw new Error(`HTTP ${novelResponse.status}: Gagal memuat data novel`);
+        }
+        
         supabaseData = await novelResponse.json();
-
-        // Load ulasan dari JSONBin (global config)
+        
+        // Validasi data minimal
+        if (!supabaseData?.chapters?.length) {
+            throw new Error('Data novel tidak valid atau kosong');
+        }
+        
+        // Load ulasan dari JSONBin
         await reviewService.fetchReviews();
-
+        
         ui.init();
         
         // Scroll Progress Listener
