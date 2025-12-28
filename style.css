@@ -1,0 +1,85 @@
+/* Base & Utilities */
+body {
+    -webkit-tap-highlight-color: transparent;
+    font-synthesis: none;
+}
+
+/* Hide Scrollbar but keep functionality */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Glassmorphism */
+.glass {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+.dark .glass {
+    background: rgba(28, 28, 30, 0.7);
+}
+
+/* Book Card Styles */
+.book-card {
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+    transform-style: preserve-3d;
+}
+
+.book-card:active {
+    transform: scale(0.96);
+}
+
+.book-cover {
+    box-shadow: 
+        0 10px 20px -5px rgba(0,0,0,0.2),
+        0 0 0 1px rgba(0,0,0,0.02);
+    transition: transform 0.4s ease;
+}
+
+.book-card:hover .book-cover {
+    transform: translateY(-5px) rotateY(-10deg);
+    box-shadow: 
+        0 20px 30px -10px rgba(0,0,0,0.3),
+        0 0 0 1px rgba(0,0,0,0.02);
+}
+
+/* Skeleton Loading */
+.skeleton {
+    background: #e0e0e0;
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    border-radius: 8px;
+}
+.dark .skeleton {
+    background: #2d2d2d;
+    background: linear-gradient(90deg, #333 25%, #2d2d2d 50%, #333 75%);
+    background-size: 200% 100%;
+}
+
+/* Status Badges */
+.status-badge {
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    padding: 0.2rem 0.5rem;
+    border-radius: 99px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.status-ongoing { background: #dbeafe; color: #1e40af; }
+.dark .status-ongoing { background: #1e3a8a; color: #bfdbfe; }
+
+.status-completed { background: #d1fae5; color: #065f46; }
+.dark .status-completed { background: #064e3b; color: #a7f3d0; }
+
+/* Progress Bar */
+.reading-progress {
+    height: 4px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: rgba(0,0,0,0.1);
+}
+.dark .reading-progress { background: rgba(255,255,255,0.1); }
+.reading-progress-bar {
+    height: 100%;
+    background: #5b6e7b;
+    transition: width 0.5s ease;
+}
