@@ -984,52 +984,82 @@ const EventBinder = {
     }
 };
 
-// === MAIN INITIALIZATION ===
-// === MAIN INITIALIZATION ===
+// === MAIN INITIALIZATION MERGED VERSION ===
 async function initApp() {
     try {
-        // 1. Load Preferences
+        // 1. Show loading indicator
+        toast.show("Memuat data...", "info");
+        
+        // 2. Load Preferences
         AppState.getInstance().loadSettings();
         ThemeManager.init();
 
-        // 2. Load Novel Data
-        toast.show("Memuat data...", "info");
+        // 3. Load Novel Data
         const response = await fetch(CONFIG.DATA_URL);
-        if (!response.ok) throw new Error(CONFIG.ERRORS.DATA_LOAD);
+        if (!response.ok) throw new Error(CONFIG.ERRORS.DATA_LOAD || 'Gagal memuat data novel');
         
         const novelData = await response.json();
         AppState.getInstance().novelData = novelData;
 
-        // 3. Load Reviews
+        // 4. Load Reviews
         await reviewService.fetchReviews();
 
-        // 4. === PERBAIKAN PENTING ===
-        // Inisialisasi UI DAN Event Listeners
-        uiController.init(); 
+        // 5. Initialize UI Components
+        uiController.init();
 
-        // === RUN SAFETY CHECK ===
-        // Ini akan otomatis memasangkan listener ke semua tombol di daftar EventBinder
-        // DAN mengecek apakah tombol tersebut ada di HTML
+        // 6. === EVENT BINDING SAFETY CHECK ===
         const checkResult = EventBinder.init();
-        
         if (checkResult.failed > 0) {
-            toast.show(`Peringatan: ${checkResult.failed} tombol gagal. Cek Console (F12).`, 'error');
+            console.warn(`Event binding failed for ${checkResult.failed} buttons`);
+            toast.show(`Peringatan: ${checkResult.failed} tombol gagal. Cek Console (F12).`, 'warning');
         }
 
-        // 5. Service Worker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js').then(() => {
-                console.log('Service Worker registered');
-            }).catch(error => {
-                console.log('SW registration failed:', error);
+        // 7. Scroll Progress Listener (from V2)
+        const mainScroll = document.getElementById('main-scroll');
+        const progressBar = document.getElementById('scroll-progress');
+        if (mainScroll && progressBar) {
+            mainScroll.addEventListener('scroll', () => {
+                const scrollTop = mainScroll.scrollTop;
+                const scrollHeight = mainScroll.scrollHeight - mainScroll.clientHeight;
+                const scrollPercent = (scrollHeight > 0) ? (scrollTop / scrollHeight) * 100 : 0;
+                progressBar.style.width = `${scrollPercent}%`;
             });
         }
 
-        // 6. Setup global error handling
-        this.setupErrorHandling();
-        
-        // 7. Setup keyboard shortcuts
-        this.setupKeyboardShortcuts();
+        // 8. Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            try {
+                await navigator.serviceWorker.register('./sw.js');
+                console.log('Service Worker registered');
+            } catch (error) {
+                console.log('SW registration failed:', error);
+            }
+        }
+
+        // 9. PWA Installer (from V2 with safety check)
+        if (typeof PWAInstall === 'function') {
+            pwaInstaller = new PWAInstall();
+        }
+
+        // 10. Global Error Handling (from V1)
+        if (typeof this.setupErrorHandling === 'function') {
+            this.setupErrorHandling();
+        }
+
+        // 11. Keyboard Shortcuts (merged approach)
+        if (typeof this.setupKeyboardShortcuts === 'function') {
+            this.setupKeyboardShortcuts();
+        } else {
+            // Fallback to V2 implementation
+            document.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                    e.preventDefault();
+                    if (typeof searchController?.show === 'function') {
+                        searchController.show();
+                    }
+                }
+            });
+        }
 
         toast.show("Aplikasi siap dibaca!", "success");
 
