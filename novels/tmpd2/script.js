@@ -245,7 +245,7 @@ const ThemeManager = {
 // === ROUTER ===
 const router = {
     backToHome: () => {
-        window.location.href = '../';
+        window.location.href = '../../';
     }
 };
 
@@ -912,6 +912,79 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// === EVENT BINDER & SAFETY CHECK ===
+const EventBinder = {
+    // Daftar mapping: ID HTML -> Fungsi Handler
+    map: {
+        // --- NAVIGATION & HEADER ---
+        'theme-toggle-btn': ThemeManager.toggleTheme,
+        'nav-theme-btn': ThemeManager.toggleTheme,
+        'search-toggle': searchController.show,
+        'search-close-btn': searchController.hide,
+        'search-backdrop': searchController.hide,
+        'nav-toggle-btn': navMenu.toggle,
+        'share-btn': shareController.shareBook,
+        
+        // --- DETAIL PAGE ---
+        'btn-synopsis': uiController.toggleSynopsis,
+        'btn-bookmark': () => uiController.toggleBookmark(uiController.state?.currentChapter), // Contextual
+        'start-reading-btn': () => ReaderController.open(0),
+        'start-fab-btn': () => ReaderController.open(0),
+        'open-review-btn': uiController.openReviewModal,
+        'close-review-btn': uiController.closeReviewModal,
+        'review-backdrop': uiController.closeReviewModal,
+        'submit-review-btn': uiController.submitReview,
+        
+        // --- READER ---
+        'reader-back-btn': ReaderController.close,
+        'btn-prev': () => ReaderController.nav(-1),
+        'btn-next': () => ReaderController.nav(1),
+        'reader-progress-container': (e) => ReaderController.jumpToProgress(e),
+        'reader-scroll': ReaderController.toggleUI, // Tap body to toggle UI
+        'reader-settings-btn': ReaderController.toggleSettings,
+        'close-settings-btn': ReaderController.toggleSettings
+    },
+
+    init: () => {
+        console.group('🛡️ Safety Check: Memeriksa Tombol (Event Listeners)');
+        
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const [id, handler] of Object.entries(this.map)) {
+            const el = document.getElementById(id);
+            
+            if (el) {
+                // Khusus untuk input (live search)
+                if (id === 'search-input') {
+                    el.oninput = handler;
+                    el.classList.add('focus:ring-2'); // Visual feedback
+                    console.log(`✅ [INPUT] #${id} terdeteksi & diaktifkan.`);
+                } else {
+                    // Biasakan tombol
+                    el.onclick = (e) => {
+                        handler(e); // Panggil handler
+                        if (el.tagName !== 'A') e.preventDefault(); // Mencegah double fire jika perlu
+                    };
+                    // Tambah kursor pointer untuk memastikan UI
+                    el.classList.add('cursor-pointer');
+                    console.log(`✅ [BUTTON] #${id} terdeteksi & klik aktif.`);
+                }
+                successCount++;
+            } else {
+                console.warn(`❌ Elemen HTML ID #${id} TIDAK DITEMUKAN! Cek HTML Anda.`);
+                failCount++;
+            }
+        }
+
+        console.log(`📊 Hasil: ${successCount} Aktif | ${failCount} Gagal`);
+        console.groupEnd();
+        
+        return { total: successCount + failCount, failed: failCount };
+    }
+};
+
+// === MAIN INITIALIZATION ===
 // === MAIN INITIALIZATION ===
 async function initApp() {
     try {
@@ -920,8 +993,9 @@ async function initApp() {
         ThemeManager.init();
 
         // 2. Load Novel Data
+        toast.show("Memuat data...", "info");
         const response = await fetch(CONFIG.DATA_URL);
-        if (!response.ok) throw new Error('Gagal memuat data novel');
+        if (!response.ok) throw new Error(CONFIG.ERRORS.DATA_LOAD);
         
         const novelData = await response.json();
         AppState.getInstance().novelData = novelData;
@@ -929,20 +1003,20 @@ async function initApp() {
         // 3. Load Reviews
         await reviewService.fetchReviews();
 
-        // 4. Init UI
-        uiController.init();
+        // 4. === PERBAIKAN PENTING ===
+        // Inisialisasi UI DAN Event Listeners
+        uiController.init(); 
 
-        // 5. Scroll Progress Listener
-        const mainScroll = document.getElementById('main-scroll');
-        const progressBar = document.getElementById('scroll-progress');
-        mainScroll.addEventListener('scroll', () => {
-            const scrollTop = mainScroll.scrollTop;
-            const scrollHeight = mainScroll.scrollHeight - mainScroll.clientHeight;
-            const scrollPercent = (scrollTop / scrollHeight) * 100;
-            progressBar.style.width = `${scrollPercent}%`;
-        });
+        // === RUN SAFETY CHECK ===
+        // Ini akan otomatis memasangkan listener ke semua tombol di daftar EventBinder
+        // DAN mengecek apakah tombol tersebut ada di HTML
+        const checkResult = EventBinder.init();
+        
+        if (checkResult.failed > 0) {
+            toast.show(`Peringatan: ${checkResult.failed} tombol gagal. Cek Console (F12).`, 'error');
+        }
 
-        // 6. Service Worker
+        // 5. Service Worker
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js').then(() => {
                 console.log('Service Worker registered');
@@ -951,18 +1025,13 @@ async function initApp() {
             });
         }
 
-        // 7. PWA Installer
-        pwaInstaller = new PWAInstall();
+        // 6. Setup global error handling
+        this.setupErrorHandling();
+        
+        // 7. Setup keyboard shortcuts
+        this.setupKeyboardShortcuts();
 
-        // 8. Keyboard Shortcuts
-        document.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-                e.preventDefault();
-                searchController.show();
-            }
-        });
-
-        toast.show("Aplikasi siap!", "success");
+        toast.show("Aplikasi siap dibaca!", "success");
 
     } catch (error) {
         console.error("Init Error:", error);
