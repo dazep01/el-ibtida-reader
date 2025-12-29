@@ -4,17 +4,11 @@
 
 // === KONFIGURASI APLIKASI ===
 const CONFIG = {
-    // Mengambil config dari window (jika ada) atau pakai default
-    JSONBIN_ID: window.NOVEL_APP_CONFIG?.JSONBIN_ID || '6951127043b1c97be909f7c1', 
+    JSONBIN_ID: window.NOVEL_APP_CONFIG?.JSONBIN_ID || '6951127043b1c97be909f7c1',
     JSONBIN_KEY: window.NOVEL_APP_CONFIG?.JSONBIN_KEY || null, 
-    DATA_URL: window.NOVEL_APP_CONFIG?.DATA_URL || './data.json', // Mengambil dari URL parameter config
+    DATA_URL: window.NOVEL_APP_CONFIG?.DATA_URL || './data.json',
     APP_NAME: 'El-Ibtida Reader',
-    ERRORS: {
-        NETWORK: 'Koneksi jaringan bermasalah.',
-        DATA_LOAD: 'Gagal memuat data novel.',
-        REVIEW_LOAD: 'Gagal memuat ulasan.',
-        REVIEW_SUBMIT: 'Gagal mengirim ulasan.'
-    }
+    DEFAULT_SETTINGS: { theme: 'auto' }
 };
 
 // --- INDEXEDDB SETUP ---
@@ -106,13 +100,13 @@ const Storage = {
                     const deleteReq = store.delete(bookId);
                     deleteReq.onsuccess = () => {
                         toast.show('Dihapus dari Tersimpan', 'info');
-                        uiController.renderChapters(); // Update UI
+                        uiController.renderChapters();
                     };
                 } else {
                     const addReq = store.add({ id: bookId, timestamp: Date.now() });
                     addReq.onsuccess = () => {
                         toast.show('Ditambahkan ke Tersimpan', 'success');
-                        uiController.renderChapters(); // Update UI
+                        uiController.renderChapters();
                     };
                 }
             };
@@ -132,7 +126,7 @@ const Storage = {
                 request.onsuccess = () => {
                     const progressObj = {};
                     request.result.forEach(item => {
-                        progressObj[item.id] = item.data; g
+                        progressObj[item.id] = item.data;
                     });
                     resolve(progressObj);
                 };
@@ -172,7 +166,7 @@ const reviewService = {
             AppState.getInstance().reviews = Array.isArray(data.record) ? data.record : []; 
             uiController.renderReviews();
         } catch (error) {
-            console.error('Error fetching reviews:', error);
+            console.error("Error fetching reviews:", error);
             AppState.getInstance().reviews = []; 
             uiController.renderReviews();
         }
@@ -251,79 +245,56 @@ const ThemeManager = {
 // === ROUTER ===
 const router = {
     backToHome: () => {
-        window.location.href = '../'; // Aman kembali ke library
+        window.location.href = '../';
     }
 };
 
 // === UI CONTROLLER ===
 const uiController = {
     init: async () => {
-        if (!AppState.getInstance().novelData) return;
-
         const data = AppState.getInstance().novelData;
         
-        // Elements
+        // 1. Pastikan data sudah dimuat
+        if (!data) {
+            console.warn("Data novel masih kosong/null");
+            return;
+        }
+
+        // 2. Ambil element DOM
         const coverTitle = document.getElementById('cover-title');
         const detailTitle = document.getElementById('detail-title');
         const detailAuthor = document.getElementById('detail-author');
         const chapterCount = document.getElementById('chapter-count');
+        const descElement = document.getElementById('detail-desc');
         const startReadingBtn = document.getElementById('start-reading-btn');
         
+        // 3. Isi Metadata (Judul, Penulis, Cover)
         if (coverTitle) coverTitle.innerText = data.title.split('#')[0].trim();
         if (detailTitle) detailTitle.innerText = data.title;
         if (detailAuthor) detailAuthor.innerText = data.author;
         if (chapterCount) chapterCount.innerText = `${data.chapters.length} Bab`;
+        
+        // --- PERBAIKAN: Isi Sinopsis ---
+        // Mencoba di beberapa kemungkinan key (description, synopsis, desc, sinopsis)
+        const synopsisText = data.description || data.synopsis || data.desc || data.sinopsis || "Belum ada sinopsis.";
+        
+        if (descElement) {
+            descElement.innerText = synopsisText;
+            // Pastikan CSS line-clamp aktif saat load awal
+            descElement.classList.add('line-clamp-3');
+        }
+        // ----------------------------------------
 
+        // 4. Render Chapters & Reviews
         const bookmarksList = await Storage.getBookmarks();
         const progressData = await Storage.getProgress();
 
-        // List Chapters
         uiController.renderChapters(bookmarksList, progressData);
-
-        // Reviews
         uiController.renderReviews();
         
-        // Event Listeners
+        // 5. Event Listeners
         uiController.bindEvents();
     },
-
-        renderNovelInfo() {
-        const data = this.state.novelData;
-        
-        // 1. Cek apakah data novel sudah dimuat
-        if (!data) {
-            console.warn("Data novel belum dimuat (null/undefined).");
-            return; 
-        }
-
-        // 2. Log data ke console untuk debugging (Buka Inspect Element -> Console)
-        console.log("Data Novel:", data);
-
-        // 3. Cari sinopsis secara "pintar". 
-        // JS akan mencoba 'description', jika tidak ada, coba 'synopsis', dst.
-        const synopsisText = data.description || data.synopsis || data.desc || data.sinopsis || "Sinopsis belum ditulis.";
-
-        // Update Element HTML
-        // Cek apakah element ada di DOM sebelum diubah
-        const descElement = document.getElementById('detail-desc');
-        if (descElement) {
-            descElement.innerText = synopsisText;
-            
-            // Reset state klamp (line-clamp)
-            descElement.classList.remove('line-clamp-3');
-            
-            // Tambahkan kembali line-clamp jika belum perlu dibuka (optional, sesuaikan kebutuhan Anda)
-            // descElement.classList.add('line-clamp-3'); 
-        }
-
-        // Update Judul & Penulis (Hanya untuk memastikan data masuk)
-        if (document.getElementById('detail-title')) {
-            document.getElementById('detail-title').innerText = data.title || "Judul Novel";
-        }
-        if (document.getElementById('detail-author')) {
-            document.getElementById('detail-author').innerText = data.author || "Penulis";
-        }
-    }
 
     renderChapters: async (bookmarksList = [], progressData = {}) => {
         const container = document.getElementById('chapter-list');
@@ -336,7 +307,7 @@ const uiController = {
             container.innerHTML = `
                 <div class="text-center py-10 text-gray-400 text-sm border border-dashed border-gray-200 dark:border-white/10 rounded-2xl">
                     <p class="font-bold">Belum ada bab</p>
-                    <p class="text-xs">Cerita sedang dalam proses penulisan. Nantikan update terbarunya!</p>
+                    <p class="text-xs">Cerita sedang dalam proses penulisan.</p>
                 </div>
             `;
             return;
@@ -352,7 +323,7 @@ const uiController = {
                         ${i+1}
                     </div>
                     <div class="flex flex-col">
-                        <span class="font-serif font-bold text-sm text-brand-text dark:text-white leading-tight">${ch.title}</span>
+                        <span class="font-serif font-bold text-sm text-brand-text dark:text-white truncate leading-tight">${ch.title}</span>
                         <span class="text-[10px] text-gray-400 mt-0.5">${ch.wordCount || 0} kata</span>
                     </div>
                 </div>
@@ -392,6 +363,7 @@ const uiController = {
                     </div>
                 </div>
             `).join('');
+            
             const avg = (state.reviews.reduce((a,b) => a + b.rating, 0) / state.reviews.length).toFixed(1);
             document.getElementById('avg-rating').innerText = avg;
         }
@@ -401,29 +373,24 @@ const uiController = {
         const container = document.getElementById('star-input');
         if (!container) return;
         container.innerHTML = '';
-        let selectedRating = 0;
+        uiController.currentStarRating = 0;
         
         for(let i=1; i<=5; i++) {
             const star = document.createElement('i');
             star.className = `ph-fill ph-star text-2xl text-gray-200 dark:text-gray-600 cursor-pointer transition-colors duration-200 hover:text-amber-300`;
             star.dataset.v = i;
             star.onclick = () => {
-                selectedRating = i;
-                uiController.updateStarDisplay(selectedRating);
+                uiController.currentStarRating = i;
+                uiController.updateStarDisplay();
             };
             container.appendChild(star);
         }
-        
-        return {
-            getRating: () => selectedRating,
-            reset: () => { selectedRating = 0; uiController.updateStarDisplay(0); }
-        };
     },
 
-    updateStarDisplay: (rating) => {
+    updateStarDisplay: () => {
         const stars = document.querySelectorAll('#star-input i');
         stars.forEach((star, i) => {
-            if(i < rating) {
+            if(i < uiController.currentStarRating) {
                 star.classList.remove('text-gray-200', 'dark:text-gray-600');
                 star.classList.add('text-amber-400');
             } else {
@@ -435,32 +402,6 @@ const uiController = {
 
     toggleBookmark: async (index) => {
         await Storage.toggleBookmark(index);
-    },
-
-    bindEvents: () => {
-        document.getElementById('btn-synopsis').onclick = uiController.toggleSynopsis;
-        document.getElementById('open-review-btn').onclick = uiController.openReviewModal;
-        document.getElementById('close-review-btn').onclick = uiController.closeReviewModal;
-        document.getElementById('submit-review-btn').onclick = uiController.submitReview;
-        document.getElementById('start-reading-btn').onclick = () => readerController.open(0);
-        document.getElementById('start-fab-btn').onclick = () => readerController.open(0);
-        document.getElementById('search-toggle').onclick = searchController.show;
-        document.getElementById('share-btn').onclick = shareController.shareBook;
-        document.getElementById('nav-toggle-btn').onclick = navMenu.toggle;
-        document.getElementById('reader-back-btn').onclick = readerController.back;
-    },
-
-    toggleSynopsis: () => {
-        const desc = document.getElementById('detail-desc');
-        const btn = document.getElementById('btn-synopsis');
-        if (desc.classList.contains('line-clamp-3')) {
-            desc.classList.remove('line-clamp-3');
-            btn.innerHTML = `Tutup <i class="ph-bold ph-caret-up"></i>`;
-            desc.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else {
-            desc.classList.add('line-clamp-3');
-            btn.innerHTML = `Baca Selengkapnya <i class="ph-bold ph-caret-down"></i>`;
-        }
     },
 
     openReviewModal: () => {
@@ -482,16 +423,15 @@ const uiController = {
     },
 
     submitReview: async () => {
-        const starManager = uiController.initStarInput();
         const name = document.getElementById('input-name').value.trim();
         const comment = document.getElementById('input-comment').value.trim();
         
-        if(starManager.getRating() === 0) { toast.show("Berikan rating bintang dulu ya!", "error"); return; }
+        if(uiController.currentStarRating === 0) { toast.show("Berikan rating bintang dulu ya!", "error"); return; }
         if(!comment) { toast.show("Ulasan tidak boleh kosong.", "error"); return; }
 
         const newReview = { 
             name: name || "Sahabat Kisah", 
-            rating: starManager.getRating(), 
+            rating: uiController.currentStarRating, 
             comment: comment, 
             date: "Baru saja" 
         };
@@ -502,28 +442,54 @@ const uiController = {
             uiController.closeReviewModal();
             document.getElementById('input-name').value = '';
             document.getElementById('input-comment').value = '';
-            starManager.reset();
+            uiController.currentStarRating = 0;
+            uiController.updateStarDisplay();
         }
+    },
+    
+    toggleSynopsis: () => {
+        const desc = document.getElementById('detail-desc');
+        const btn = document.getElementById('btn-synopsis');
+        if(!desc || !btn) return;
+
+        if (desc.classList.contains('line-clamp-3')) {
+            desc.classList.remove('line-clamp-3');
+            btn.innerHTML = `Tutup <i class="ph-bold ph-caret-up"></i>`;
+            // Optional: smooth scroll
+            // desc.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+            desc.classList.add('line-clamp-3');
+            btn.innerHTML = `Baca Selengkapnya <i class="ph-bold ph-caret-down"></i>`;
+        }
+    },
+
+    bindEvents: () => {
+        document.getElementById('btn-synopsis').onclick = uiController.toggleSynopsis;
+        document.getElementById('open-review-btn').onclick = uiController.openReviewModal;
+        document.getElementById('close-review-btn').onclick = uiController.closeReviewModal;
+        document.getElementById('submit-review-btn').onclick = uiController.submitReview;
+        document.getElementById('start-reading-btn').onclick = () => readerController.open(0);
+        document.getElementById('start-fab-btn').onclick = () => readerController.open(0);
+        document.getElementById('search-toggle').onclick = searchController.show;
+        document.getElementById('share-btn').onclick = shareController.shareBook;
+        document.getElementById('nav-toggle-btn').onclick = navMenu.toggle;
+        document.getElementById('reader-back-btn').onclick = readerController.back;
     }
 };
 
 // === READER CONTROLLER ===
 const readerController = {
+    idx: 0,
+    isUIHidden: false,
+    
     open: (i) => {
-        const data = AppState.getInstance().novelData;
-        if (!data || !data.chapters[i]) return;
-        
         readerController.idx = i;
         readerController.render();
-        
         const view = document.getElementById('view-reader');
         view.classList.remove('hidden');
         void view.offsetWidth; 
         view.classList.remove('translate-y-full');
         document.body.style.overflow = 'hidden';
-        
-        // Simpan progress
-        Storage.setProgress(data.id, i);
     },
     
     back: () => {
@@ -550,17 +516,14 @@ const readerController = {
     },
     
     nav: (d) => { 
-        const max = AppState.getInstance().novelData.chapters.length;
-        if (readerController.idx + d >= 0 && readerController.idx + d < max) {
+        if (readerController.idx + d >= 0 && readerController.idx + d < AppState.getInstance().novelData.chapters.length) {
             readerController.idx += d; 
             readerController.render();
         }
     },
 
     updateProgress: () => {
-        const max = AppState.getInstance().novelData.chapters.length;
-        if (max === 0) return;
-        const pct = ((readerController.idx+1)/max)*100;
+        const pct = ((readerController.idx+1)/AppState.getInstance().novelData.chapters.length)*100;
         document.getElementById('progress-bar').style.width = `${pct}%`;
         document.getElementById('mini-progress').style.width = `${pct}%`;
     },
@@ -569,9 +532,8 @@ const readerController = {
         const rect = e.currentTarget.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const pct = x / rect.width;
-        const max = AppState.getInstance().novelData.chapters.length;
-        const targetIdx = Math.floor(pct * max);
-        if(targetIdx >= 0 && targetIdx < max) {
+        const targetIdx = Math.floor(pct * AppState.getInstance().novelData.chapters.length);
+        if(targetIdx >= 0 && targetIdx < AppState.getInstance().novelData.chapters.length) {
             readerController.idx = targetIdx;
             readerController.render();
         }
@@ -607,6 +569,8 @@ const readerController = {
 // === SEARCH CONTROLLER ===
 const searchController = {
     results: [],
+    currentQuery: '',
+    
     show: () => {
         const modal = document.getElementById('search-modal');
         const content = document.getElementById('search-modal-content');
@@ -617,6 +581,7 @@ const searchController = {
             document.getElementById('search-input').focus();
         }, 10);
     },
+    
     hide: () => {
         const modal = document.getElementById('search-modal');
         const content = document.getElementById('search-modal-content');
@@ -627,33 +592,33 @@ const searchController = {
             searchController.clearResults();
         }, 300);
     },
+    
     perform: (query) => {
-        const data = AppState.getInstance().novelData;
-        if(!data || data.chapters.length === 0) return;
-        
-        const queryTrim = query.trim().toLowerCase();
-        if (!queryTrim) { searchController.clearResults(); return; }
+        searchController.currentQuery = query.trim().toLowerCase();
+        if (!searchController.currentQuery) { searchController.clearResults(); return; }
         
         searchController.results = [];
-        data.chapters.forEach((chapter, index) => {
+        AppState.getInstance().novelData.chapters.forEach((chapter, chapterIndex) => {
             const textContent = chapter.content.replace(/<[^>]*>/g, ' ').toLowerCase();
-            const matchIndex = textContent.indexOf(queryTrim);
+            let matchIndex = textContent.indexOf(searchController.currentQuery);
             
-            if (matchIndex !== -1) {
+            while (matchIndex !== -1) {
                 const start = Math.max(0, matchIndex - 50);
-                const end = Math.min(textContent.length, matchIndex + queryTrim.length + 100);
+                const end = Math.min(textContent.length, matchIndex + searchController.currentQuery.length + 100);
                 const context = textContent.substring(start, end);
                 const highlighted = context.replace(
-                    new RegExp(queryTrim, 'gi'),
+                    new RegExp(searchController.currentQuery, 'gi'),
                     match => `<mark class="bg-yellow-200 dark:bg-yellow-900 text-black dark:text-yellow-100 px-1 rounded">${match}</mark>`
                 );
                 
-                searchController.results.push({ index, chapterTitle: chapter.title, context: highlighted });
+                searchController.results.push({ chapterIndex, chapterTitle: chapter.title, context: highlighted });
+                matchIndex = textContent.indexOf(searchController.currentQuery, matchIndex + 1);
             }
         });
         
         searchController.renderResults();
     },
+    
     renderResults: () => {
         const container = document.getElementById('search-results');
         const countElement = document.getElementById('search-count');
@@ -664,9 +629,9 @@ const searchController = {
             return;
         }
         
-        container.innerHTML = searchController.results.map(r => `
+        container.innerHTML = searchController.results.map((r, i) => `
             <div class="bg-gray-50 dark:bg-white/5 p-4 rounded-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-white/10"
-                 onclick="searchController.openResult(${r.index})">
+                 onclick="searchController.openResult(${r.chapterIndex})">
                 <div class="text-xs font-bold text-brand-text mb-1">${r.chapterTitle}</div>
                 <div class="text-xs text-gray-600 dark:text-gray-300">...${r.context}...</div>
             </div>
@@ -674,10 +639,12 @@ const searchController = {
         
         countElement.textContent = `${searchController.results.length} hasil`;
     },
+
     openResult: (idx) => {
         searchController.hide();
         readerController.open(idx);
     },
+
     clearResults: () => {
         searchController.results = [];
         document.getElementById('search-results').innerHTML = '';
@@ -687,47 +654,42 @@ const searchController = {
 };
 
 // === NAV MENU CONTROLLER ===
-const navMenu = {
-    toggle: () => {
-        const nav = document.getElementById('floating-nav');
-        const toggle = document.getElementById('nav-toggle-btn');
+function toggleNav() {
+    const nav = document.getElementById('floating-nav');
+    const toggle = document.getElementById('nav-toggle-btn');
+    
+    if(nav.classList.contains('hidden-popover')) {
+        nav.classList.remove('hidden-popover');
+        nav.classList.add('visible-popover');
         
-        if(nav.classList.contains('hidden-popover')) {
-            nav.classList.remove('hidden-popover');
-            nav.classList.add('visible-popover');
-            
-            if (navMenu.clickListener) document.removeEventListener('click', navMenu.clickListener);
-            
-            navMenu.clickListener = function(e) {
-                if (!nav.contains(e.target) && !toggle.contains(e.target)) {
-                    nav.classList.remove('visible-popover');
-                    nav.classList.add('hidden-popover');
-                    document.removeEventListener('click', navMenu.clickListener);
-                    navMenu.clickListener = null;
-                }
-            };
-            
-            setTimeout(() => document.addEventListener('click', navMenu.clickListener), 10);
-        } else {
-            nav.classList.remove('visible-popover');
-            nav.classList.add('hidden-popover');
-            if (navMenu.clickListener) {
-                document.removeEventListener('click', navMenu.clickListener);
-                navMenu.clickListener = null;
+        if (navClickListener) document.removeEventListener('click', navClickListener);
+        
+        navClickListener = function(e) {
+            if (!nav.contains(e.target) && !toggle.contains(e.target)) {
+                nav.classList.remove('visible-popover');
+                nav.classList.add('hidden-popover');
+                document.removeEventListener('click', navClickListener);
+                navClickListener = null;
             }
+        };
+        
+        setTimeout(() => document.addEventListener('click', navClickListener), 10);
+    } else {
+        nav.classList.remove('visible-popover');
+        nav.classList.add('hidden-popover');
+        if (navClickListener) {
+            document.removeEventListener('click', navClickListener);
+            navClickListener = null;
         }
     }
-};
+}
 
-// === SHARE CONTROLLER ===
+// === ENHANCED SHARE ===
 const shareController = {
     shareBook: async () => {
-        const data = AppState.getInstance().novelData;
-        if (!data) return;
-
         const shareData = {
-            title: data.title,
-            text: `Baca "${data.title}" karya ${data.author}`,
+            title: AppState.getInstance().novelData.title,
+            text: `Baca "${AppState.getInstance().novelData.title}" karya ${AppState.getInstance().novelData.author}`,
             url: window.location.href
         };
         if (navigator.share) {
@@ -736,10 +698,103 @@ const shareController = {
             navigator.clipboard.writeText(`${shareData.text} - ${shareData.url}`);
             toast.show('Link berhasil disalin!', 'success');
         }
+    },
+    
+    shareQuote: async (text) => {
+        if (navigator.share) {
+            try { await navigator.share({ title: 'Kutipan', text: `"${text}" - ${AppState.getInstance().novelData.title}` }); } catch (e) {}
+        } else {
+            navigator.clipboard.writeText(text);
+            toast.show('Kutipan disalin', 'success');
+        }
     }
 };
 
-// === TOAST SYSTEM ===
+// === TEXT HIGHLIGHTER ===
+class TextHighlighter {
+    constructor() {
+        this.selection = null;
+        this.toolbar = null;
+        this.init();
+    }
+    
+    init() {
+        document.addEventListener('mouseup', (e) => this.handleSelection(e));
+        document.addEventListener('touchend', (e) => this.handleSelection(e));
+        document.addEventListener('mousedown', (e) => {
+            if (this.toolbar && !this.toolbar.contains(e.target)) this.removeToolbar();
+        });
+    }
+    
+    handleSelection(e) {
+        if (e.target.closest('.reader-ui') || e.target.closest('.selection-toolbar')) return;
+        
+        const selection = window.getSelection();
+        const selectedText = selection.toString().trim();
+        
+        if (selectedText.length > 0 && selectedText.length < 500) {
+            this.selection = selection;
+            this.showToolbar(e);
+        } else {
+            this.removeToolbar();
+        }
+    }
+    
+    showToolbar(e) {
+        this.removeToolbar();
+        
+        const range = this.selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        
+        // Fix positioning
+        const toolbarWidth = 300; 
+        let top = rect.top + window.scrollY - 60;
+        let left = rect.left + window.scrollX + (rect.width / 2) - (toolbarWidth / 2);
+        
+        if (left < 10) left = 10;
+        if (left + toolbarWidth > window.innerWidth - 10) left = window.innerWidth - toolbarWidth - 10;
+        if (top < 10) top = rect.bottom + window.scrollY + 10;
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'selection-toolbar';
+        toolbar.style.left = `${left}px`;
+        toolbar.style.top = `${top}px`;
+        
+        toolbar.innerHTML = `
+            <button onclick="textHighlighter.copyText()" title="Salin"><i class="ph ph-copy-simple"></i></button>
+            <button onclick="textHighlighter.shareQuote()" title="Bagikan"><i class="ph ph-share-network"></i></button>
+            <div class="selection-toolbar-divider"></div>
+            <button onclick="textHighlighter.highlight('yellow')" title="Kuning" style="color:#FFD700"><i class="ph ph-highlight"></i></button>
+            <button onclick="textHighlighter.removeToolbar()"><i class="ph ph-x"></i></button>
+        `;
+        
+        document.body.appendChild(toolbar);
+        this.toolbar = toolbar;
+    }
+    
+    removeToolbar() {
+        if (this.toolbar) { this.toolbar.remove(); this.toolbar = null; }
+        this.selection = null;
+    }
+    
+    copyText() {
+        navigator.clipboard.writeText(window.getSelection().toString());
+        toast.show('Teks disalin', 'success');
+        this.removeToolbar();
+    }
+    shareQuote() {
+        shareController.shareQuote(window.getSelection().toString());
+        this.removeToolbar();
+    }
+    highlight(color) {
+        toast.show('Highlight disimpan', 'success');
+        this.removeToolbar();
+    }
+}
+
+const textHighlighter = new TextHighlighter();
+
+// === TOAST ===
 const toast = {
     show: (message, type = 'info') => {
         const container = document.getElementById('toast-container');
@@ -767,8 +822,95 @@ const toast = {
         }, 3000);
         
         el.onclick = () => el.remove();
-    }
+    },
+    clearAll: () => document.getElementById('toast-container').innerHTML = ''
 };
+
+// === PWA INSTALLER ===
+class PWAInstall {
+    constructor() {
+        this.deferredPrompt = null;
+        this.installButton = null;
+        this.init();
+    }
+    
+    init() {
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            this.deferredPrompt = e;
+            this.showInstallButton();
+        });
+        
+        window.addEventListener('appinstalled', () => {
+            toast.show('✅ Aplikasi terinstal!', 'success');
+            this.hideInstallButton();
+        });
+    }
+    
+    showInstallButton() {
+        if(!document.getElementById('floating-nav')) return;
+        const nav = document.getElementById('floating-nav');
+        if(nav.querySelector('.install-pwa-btn')) return;
+        
+        const installBtn = document.createElement('button');
+        installBtn.className = 'install-pwa-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors';
+        installBtn.innerHTML = '<i class="ph ph-download-simple text-lg"></i> Install Aplikasi';
+        installBtn.onclick = (e) => { e.stopPropagation(); this.promptInstall(); toggleNav(); };
+        
+        const container = nav.querySelector('.py-2');
+        if(container) container.insertBefore(installBtn, container.firstChild);
+        
+        this.installButton = installBtn;
+        toast.show('📱 Tersedia Install Aplikasi');
+    }
+    
+    async promptInstall() {
+        if (!this.deferredPrompt) return;
+        this.deferredPrompt.prompt();
+        const { outcome } = await this.deferredPrompt.userChoice;
+        this.deferredPrompt = null;
+        this.hideInstallButton();
+    }
+    
+    hideInstallButton() {
+        if (this.installButton) { this.installButton.remove(); this.installButton = null; }
+    }
+}
+
+let pwaInstaller = new PWAInstall();
+
+// === CLEANUP ===
+function cleanupModals() {
+    toast.clearAll();
+    const nav = document.getElementById('floating-nav');
+    if(nav) {
+        nav.classList.remove('visible-popover');
+        nav.classList.add('hidden-popover');
+    }
+    const reviewModal = document.getElementById('modal-review');
+    if(reviewModal && !reviewModal.classList.contains('hidden')) {
+        uiController.closeReviewModal();
+    }
+    const searchModal = document.getElementById('search-modal');
+    if(searchModal && !searchModal.classList.contains('hidden')) {
+        searchController.hide();
+    }
+    
+    // Highlighters cleanup
+    if(textHighlighter.toolbar) {
+        textHighlighter.toolbar.remove();
+        textHighlighter.toolbar = null;
+    }
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        cleanupModals();
+        readerController.isUIHidden = false;
+        document.getElementById('reader-top').classList.remove('reader-hidden');
+        document.getElementById('reader-bottom').classList.remove('reader-hidden');
+    }
+});
 
 // === MAIN INITIALIZATION ===
 async function initApp() {
@@ -778,9 +920,8 @@ async function initApp() {
         ThemeManager.init();
 
         // 2. Load Novel Data
-        toast.show("Memuat data...", "info");
         const response = await fetch(CONFIG.DATA_URL);
-        if (!response.ok) throw new Error(CONFIG.ERRORS.DATA_LOAD);
+        if (!response.ok) throw new Error('Gagal memuat data novel');
         
         const novelData = await response.json();
         AppState.getInstance().novelData = novelData;
@@ -791,12 +932,37 @@ async function initApp() {
         // 4. Init UI
         uiController.init();
 
-        // 5. Service Worker
+        // 5. Scroll Progress Listener
+        const mainScroll = document.getElementById('main-scroll');
+        const progressBar = document.getElementById('scroll-progress');
+        mainScroll.addEventListener('scroll', () => {
+            const scrollTop = mainScroll.scrollTop;
+            const scrollHeight = mainScroll.scrollHeight - mainScroll.clientHeight;
+            const scrollPercent = (scrollTop / scrollHeight) * 100;
+            progressBar.style.width = `${scrollPercent}%`;
+        });
+
+        // 6. Service Worker
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js').catch(e => console.log('SW Fail', e));
+            navigator.serviceWorker.register('./sw.js').then(() => {
+                console.log('Service Worker registered');
+            }).catch(error => {
+                console.log('SW registration failed:', error);
+            });
         }
 
-        toast.show("Siap membaca!", "success");
+        // 7. PWA Installer
+        pwaInstaller = new PWAInstall();
+
+        // 8. Keyboard Shortcuts
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                searchController.show();
+            }
+        });
+
+        toast.show("Aplikasi siap!", "success");
 
     } catch (error) {
         console.error("Init Error:", error);
@@ -804,5 +970,5 @@ async function initApp() {
     }
 }
 
-// Jalankan aplikasi saat DOM siap
+// Start
 document.addEventListener('DOMContentLoaded', initApp);
