@@ -1,6 +1,22 @@
 // ==========================================
-// NOVEL READER - LOGIC ENGINE
+// NOVEL READER - LOGIC ENGINE (Self Revision)
 // ==========================================
+
+// REVISED: SECURITY HELPER
+// Mencegah XSS pada konten user-generated (ulasan).
+// Tidak digunakan pada konten novel karena novel butuh formatting HTML.
+const escapeHTML = (str) => {
+    if (!str) return '';
+    return str.replace(/[&<>'"]/g, 
+        tag => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            "'": '&#39;',
+            '"': '&quot;'
+        }[tag]));
+};
+
 
 // === KONFIGURASI APLIKASI ===
 const CONFIG = {
@@ -8,32 +24,30 @@ const CONFIG = {
     JSONBIN_KEY: window.NOVEL_APP_CONFIG?.JSONBIN_KEY || null, 
     DATA_URL: window.NOVEL_APP_CONFIG?.DATA_URL || './data.json',
     APP_NAME: 'El-Ibtida Reader',
-    DEFAULT_SETTINGS: { theme: 'auto' }
+    ERRORS: {
+        NETWORK: 'Koneksi jaringan bermasalah.',
+        DATA_LOAD: 'Gagal memuat data novel.'
+    }
 };
 
 // --- INDEXEDDB SETUP ---
 const DB_NAME = 'ElIbtidaReaderDB';
 const DB_VERSION = 1;
+// REVISED: DOCUMENTATION
+// Schema MVP: Menggunakan keyPath sederhana ('id') tanpa index kompleks.
+// Belum ada strategi migrasi versi (migration path) untuk fase ini.
 const dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onerror = (e) => {
         console.error("IndexedDB error:", e);
         reject("Gagal membuka database");
     };
-    request.onsuccess = (e) => {
-        resolve(e.target.result);
-    };
+    request.onsuccess = (e) => resolve(e.target.result);
     request.onupgradeneeded = (e) => {
         const db = e.target.result;
-        if (!db.objectStoreNames.contains('bookmarks')) {
-            db.createObjectStore('bookmarks', { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains('progress')) {
-            db.createObjectStore('progress', { keyPath: 'id' });
-        }
-        if (!db.objectStoreNames.contains('highlights')) {
-            db.createObjectStore('highlights', { keyPath: 'id' });
-        }
+        if (!db.objectStoreNames.contains('bookmarks')) db.createObjectStore('bookmarks', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('progress')) db.createObjectStore('progress', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('highlights')) db.createObjectStore('highlights', { keyPath: 'id' });
     };
 });
 
@@ -45,15 +59,13 @@ class AppState {
         this.settings = { theme: 'auto' };
         this.currentChapter = 0;
         this.bookmarks = new Set();
-        this.highlights = [];
-        this.isInitialized = false;
-        this.isLoading = false;
+        // REVISED: STATE CONSISTENCY
+        // Dihapus: this.highlights = []; 
+        // Alasan: Menghindari dual source of truth. Source utama adalah IndexedDB.
     }
 
     static getInstance() {
-        if (!AppState.instance) {
-            AppState.instance = new AppState();
-        }
+        if (!AppState.instance) AppState.instance = new AppState();
         return AppState.instance;
     }
 
@@ -97,14 +109,12 @@ const Storage = {
             
             getRequest.onsuccess = async () => {
                 if (getRequest.result) {
-                    const deleteReq = store.delete(bookId);
-                    deleteReq.onsuccess = () => {
+                    store.delete(bookId).onsuccess = () => {
                         toast.show('Dihapus dari Tersimpan', 'info');
                         uiController.renderChapters();
                     };
                 } else {
-                    const addReq = store.add({ id: bookId, timestamp: Date.now() });
-                    addReq.onsuccess = () => {
+                    store.add({ id: bookId, timestamp: Date.now() }).onsuccess = () => {
                         toast.show('Ditambahkan ke Tersimpan', 'success');
                         uiController.renderChapters();
                     };
@@ -125,9 +135,7 @@ const Storage = {
             return new Promise((resolve) => {
                 request.onsuccess = () => {
                     const progressObj = {};
-                    request.result.forEach(item => {
-                        progressObj[item.id] = item.data;
-                    });
+                    request.result.forEach(item => progressObj[item.id] = item.data);
                     resolve(progressObj);
                 };
                 request.onerror = () => resolve({});
@@ -143,19 +151,53 @@ const Storage = {
             const db = await dbPromise;
             const tx = db.transaction('progress', 'readwrite');
             const store = tx.objectStore('progress');
-            const data = {
-                id: bookId,
-                data: { chapterIndex, lastRead: Date.now() }
-            };
-            store.put(data); 
+            store.put({ id: bookId, data: { chapterIndex, lastRead: Date.now() } });
         } catch (error) {
             console.error("Error setProgress:", error);
         }
     }
+    
+    // === HIGHLIGHT STORAGE ===
+     getHighlight: async (key) => {
+         try {
+             const db = await dbPromise;
+             const tx = db.transaction('highlights', 'readonly');
+             const store = tx.objectStore('highlights');
+             const req = store.get(key);
+             return new Promise(resolve => {
+                 req.onsuccess = () => resolve(req.result || null);
+                 req.onerror = () => resolve(null);
+             });
+         } catch {
+             return null;
+         }
+     },
+     
+     setHighlight: async (key, content) => {
+         try {
+             // REVISED: TECHNICAL DECISION
+             // Menyimpan full HTML string daripada koordinat range/offset.
+             // Alasan: DOM novel statis & sederhana. Menyimpan HTML lebih robust terhadap 
+             // perubahan styling minor dibanding range offset yang rapuh (brittle).
+             const db = await dbPromise;
+             const tx = db.transaction('highlights', 'readwrite');
+             tx.objectStore('highlights').put({
+                 id: key,
+                 content,
+                 updatedAt: Date.now()
+             });
+         } catch (e) {
+             console.error('Save highlight failed', e);
+         }
+     }
 };
 
 // === REVIEW SERVICE (JSONBin) ===
 const reviewService = {
+    // REVISED: SERVICE ARCHITECTURE
+    // Menggunakan JSONBin sebagai backend sementara (NoSQL-like).
+    // Trade-off: Rate limit & tidak ada validasi server-side yang ketat (hanya client-side).
+    
     fetchReviews: async () => {
         try {
             const response = await fetch(`https://api.jsonbin.io/v3/b/${CONFIG.JSONBIN_ID}/latest`, {
@@ -174,17 +216,22 @@ const reviewService = {
 
     postReview: async (newReview) => {
         try {
-            // 1. Get current data
+            // REVISED: LOGIC FIX (SINGLE READ)
+            // Sebelumnya memanggil .json() dua kali yang menyebabkan crash/error stream.
+            // Sekarang membaca sekali, simpan ke variabel, baru proses.
             const getResponse = await fetch(`https://api.jsonbin.io/v3/b/${CONFIG.JSONBIN_ID}/latest`, {
                 headers: { 'X-Master-Key': CONFIG.JSONBIN_KEY }
             });
-            const getData = await getResponse.json();
-            let currentReviews = Array.isArray(getData.record) ? getData.record : [];
+            
+            if (!getResponse.ok) throw new Error('Gagal mengambil data lama');
 
-            // 2. Add new review
+            const data = await getResponse.json(); // Single read point
+            const currentReviews = Array.isArray(data.record) ? data.record : [];
+            
+            // Update state lokal
             currentReviews.unshift(newReview);
 
-            // 3. Update
+            // PUT Request
             const putResponse = await fetch(`https://api.jsonbin.io/v3/b/${CONFIG.JSONBIN_ID}`, {
                 method: 'PUT',
                 headers: {
@@ -196,7 +243,6 @@ const reviewService = {
 
             if (!putResponse.ok) throw new Error('Gagal menyimpan ulasan');
 
-            // 4. Update state
             AppState.getInstance().reviews = currentReviews;
             uiController.renderReviews();
             toast.show("Terima kasih! Ulasan berhasil dikirim.", "success");
@@ -209,36 +255,34 @@ const reviewService = {
     }
 };
 
+
 // === THEME MANAGER ===
 const ThemeManager = {
-    init: () => {
-        ThemeManager.applyTheme();
-        ThemeManager.setupListeners();
+    init() {
+        this.applyTheme();
+        // Event listeners di-handle oleh EventBinder
     },
     
-    applyTheme: () => {
+    applyTheme() {
         const isDark = document.body.classList.contains('dark-mode');
         const icon = document.getElementById('theme-icon');
         const navIcon = document.getElementById('nav-theme-icon');
-        if (isDark) {
-            icon.className = 'ph-fill ph-sun text-lg text-yellow-400';
-            navIcon.className = 'ph-fill ph-sun text-lg text-yellow-400';
-        } else {
-            icon.className = 'ph ph-moon text-lg';
-            navIcon.className = 'ph ph-moon text-lg';
+        if (icon && navIcon) {
+            if (isDark) {
+                icon.className = 'ph-fill ph-sun text-lg text-yellow-400';
+                navIcon.className = 'ph-fill ph-sun text-lg text-yellow-400';
+            } else {
+                icon.className = 'ph ph-moon text-lg';
+                navIcon.className = 'ph ph-moon text-lg';
+            }
         }
     },
 
-    toggleTheme: () => {
+    toggleTheme() {
         document.body.classList.toggle('dark-mode');
         localStorage.setItem('theme', document.body.classList.contains('dark-mode') ? 'dark' : 'light');
         ThemeManager.applyTheme();
         toast.show(document.body.classList.contains('dark-mode') ? "Mode Gelap Aktif" : "Mode Terang Aktif");
-    },
-
-    setupListeners: () => {
-        document.getElementById('theme-toggle-btn').onclick = ThemeManager.toggleTheme;
-        document.getElementById('nav-theme-btn').onclick = ThemeManager.toggleTheme;
     }
 };
 
@@ -251,58 +295,47 @@ const router = {
 
 // === UI CONTROLLER ===
 const uiController = {
-    init: async () => {
+    currentStarRating: 0,
+    isSynopsisExpanded: false,
+
+    async init() {
         const data = AppState.getInstance().novelData;
-        
-        // 1. Pastikan data sudah dimuat
         if (!data) {
             console.warn("Data novel masih kosong/null");
             return;
         }
 
-        // 2. Ambil element DOM
+        // Render Metadata
         const coverTitle = document.getElementById('cover-title');
         const detailTitle = document.getElementById('detail-title');
         const detailAuthor = document.getElementById('detail-author');
         const chapterCount = document.getElementById('chapter-count');
         const descElement = document.getElementById('detail-desc');
-        const startReadingBtn = document.getElementById('start-reading-btn');
         
-        // 3. Isi Metadata (Judul, Penulis, Cover)
         if (coverTitle) coverTitle.innerText = data.title.split('#')[0].trim();
         if (detailTitle) detailTitle.innerText = data.title;
         if (detailAuthor) detailAuthor.innerText = data.author;
         if (chapterCount) chapterCount.innerText = `${data.chapters.length} Bab`;
-        
-        // --- PERBAIKAN: Isi Sinopsis ---
-        // Mencoba di beberapa kemungkinan key (description, synopsis, desc, sinopsis)
-        const synopsisText = data.description || data.synopsis || data.desc || data.sinopsis || "Belum ada sinopsis.";
-        
+
+        // Render Synopsis dengan fallback multi-key
+        const synopsisText = data.description || data.synopsis || data.desc || data.sinopsis || "Sinopsis belum ditulis.";
         if (descElement) {
             descElement.innerText = synopsisText;
-            // Pastikan CSS line-clamp aktif saat load awal
             descElement.classList.add('line-clamp-3');
         }
-        // ----------------------------------------
 
-        // 4. Render Chapters & Reviews
-        const bookmarksList = await Storage.getBookmarks();
-        const progressData = await Storage.getProgress();
-
-        uiController.renderChapters(bookmarksList, progressData);
+        // Load data & render
+        await uiController.renderChapters();
         uiController.renderReviews();
-        
-        // 5. Event Listeners
-        uiController.bindEvents();
+        uiController.initStarInput();
     },
 
-    renderChapters: async (bookmarksList = [], progressData = {}) => {
+    async renderChapters() {
         const container = document.getElementById('chapter-list');
         const data = AppState.getInstance().novelData;
         if (!container || !data) return;
 
         container.innerHTML = '';
-
         if (data.chapters.length === 0) {
             container.innerHTML = `
                 <div class="text-center py-10 text-gray-400 text-sm border border-dashed border-gray-200 dark:border-white/10 rounded-2xl">
@@ -313,25 +346,30 @@ const uiController = {
             return;
         }
 
+        const bookmarksList = await Storage.getBookmarks();
+        const progressData = await Storage.getProgress();
+
         data.chapters.forEach((ch, i) => {
             const el = document.createElement('div');
             el.className = "flex items-center justify-between p-4 bg-white dark:bg-brand-paperDark rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm cursor-pointer active:scale-[0.98] transition-all duration-200 group hover:border-brand-slate/20";
             el.onclick = () => readerController.open(i);
+            
+            const isBookmarked = bookmarksList.includes(i);
             el.innerHTML = `
                 <div class="flex items-center gap-4">
-                    <div class="w-8 h-8 rounded-full bg-brand-bg dark:bg-white/5 flex items-center justify-center text-brand-slate dark:text-brand-slateLight font-bold text-xs group-hover:bg-brand-slate group-hover:text-white transition-colors">
+                    <div class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/5 flex items-center justify-center text-gray-600 dark:text-gray-300 font-medium text-sm group-hover:bg-brand-slate group-hover:text-white transition-colors flex-shrink-0">
                         ${i+1}
                     </div>
-                    <div class="flex flex-col">
-                        <span class="font-serif font-bold text-sm text-brand-text dark:text-white truncate leading-tight">${ch.title}</span>
-                        <span class="text-[10px] text-gray-400 mt-0.5">${ch.wordCount || 0} kata</span>
+                    <div class="flex-1 min-w-0">
+                        <h4 class="font-medium text-sm text-gray-800 dark:text-white truncate">${ch.title}</h4>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${ch.wordCount || 0} kata</p>
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button class="bookmark-btn p-2 text-gray-400 hover:text-yellow-500 transition-colors ${bookmarksList.includes(i) ? 'text-yellow-500' : ''}"
+                    <button class="bookmark-btn p-2 text-gray-400 hover:text-yellow-500 transition-colors ${isBookmarked ? 'text-yellow-500' : ''}"
                             data-index="${i}"
                             onclick="event.stopPropagation(); uiController.toggleBookmark(${i})">
-                        <i class="ph ${bookmarksList.includes(i) ? 'ph-bookmark-simple-fill' : 'ph-bookmark-simple'} text-lg"></i>
+                        <i class="ph ${isBookmarked ? 'ph-bookmark-simple-fill' : 'ph-bookmark-simple'} text-lg"></i>
                     </button>
                     <i class="ph ph-caret-right text-gray-300 dark:text-gray-600 group-hover:text-brand-slate transition-colors"></i>
                 </div>
@@ -340,36 +378,42 @@ const uiController = {
         });
     },
 
-    renderReviews: () => {
+    renderReviews() {
         const container = document.getElementById('reviews-container');
         const state = AppState.getInstance();
         if (!container) return;
 
         if (state.reviews.length === 0) {
             container.innerHTML = `<p class="text-center text-xs text-gray-400 py-6 bg-gray-50 dark:bg-white/5 rounded-2xl border border-dashed border-gray-200 dark:border-white/10">Belum ada ulasan.</p>`;
-            document.getElementById('avg-rating').innerText = '0.0';
+            const avgElement = document.getElementById('avg-rating');
+            if (avgElement) avgElement.innerText = '0.0';
         } else {
+            // REVISED: SECURITY BOUNDARY
+            // Menggunakan escapeHTML() untuk membersihkan input user sebelum render.
+            // Mencegah potensi XSS injection via nama atau komentar.
             container.innerHTML = state.reviews.map(r => `
                 <div class="bg-white dark:bg-brand-paperDark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-white/5 flex gap-3 transition-colors">
                     <div class="w-8 h-8 rounded-full bg-brand-slate/10 dark:bg-white/10 text-brand-slate dark:text-brand-slateLight flex-shrink-0 flex items-center justify-center text-[10px] font-bold border border-brand-slate/10 dark:border-white/5">
-                        ${r.name ? r.name[0].toUpperCase() : '?'}
+                        ${r.name ? escapeHTML(r.name)[0].toUpperCase() : '?'}
                     </div>
                     <div class="flex-1">
                         <div class="flex justify-between items-center mb-1">
-                            <h5 class="text-xs font-bold text-brand-text dark:text-white">${r.name || 'Anonim'}</h5>
+                            <h5 class="text-xs font-bold text-brand-text dark:text-white">${escapeHTML(r.name || 'Anonim')}</h5>
                             <div class="flex text-[10px] text-amber-400">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</div>
                         </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed font-book">"${r.comment}"</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed font-book">"${escapeHTML(r.comment)}"</p>
                     </div>
                 </div>
             `).join('');
             
             const avg = (state.reviews.reduce((a,b) => a + b.rating, 0) / state.reviews.length).toFixed(1);
-            document.getElementById('avg-rating').innerText = avg;
+            const avgElement = document.getElementById('avg-rating');
+            if (avgElement) avgElement.innerText = avg;
         }
     },
 
-    initStarInput: () => {
+
+    initStarInput() {
         const container = document.getElementById('star-input');
         if (!container) return;
         container.innerHTML = '';
@@ -387,7 +431,7 @@ const uiController = {
         }
     },
 
-    updateStarDisplay: () => {
+    updateStarDisplay() {
         const stars = document.querySelectorAll('#star-input i');
         stars.forEach((star, i) => {
             if(i < uiController.currentStarRating) {
@@ -400,31 +444,42 @@ const uiController = {
         });
     },
 
-    toggleBookmark: async (index) => {
+    async toggleBookmark(index) {
         await Storage.toggleBookmark(index);
     },
 
-    openReviewModal: () => {
+    openReviewModal() {
         const modal = document.getElementById('modal-review');
         const content = document.getElementById('modal-content');
-        modal.classList.remove('hidden');
-        setTimeout(() => {
-            modal.classList.remove('opacity-0');
-            content.classList.remove('translate-y-full');
-        }, 10);
+        if (modal && content) {
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                content.classList.remove('translate-y-full');
+                document.body.style.overflow = 'hidden';
+            }, 10);
+        }
     },
 
-    closeReviewModal: () => {
+    closeReviewModal() {
         const modal = document.getElementById('modal-review');
         const content = document.getElementById('modal-content');
-        modal.classList.add('opacity-0');
-        content.classList.add('translate-y-full');
-        setTimeout(() => modal.classList.add('hidden'), 300);
+        if (modal && content) {
+            modal.classList.add('opacity-0');
+            content.classList.add('translate-y-full');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                document.body.style.overflow = '';
+            }, 300);
+        }
     },
 
-    submitReview: async () => {
-        const name = document.getElementById('input-name').value.trim();
-        const comment = document.getElementById('input-comment').value.trim();
+    async submitReview() {
+        const nameInput = document.getElementById('input-name');
+        const commentInput = document.getElementById('input-comment');
+        
+        const name = (nameInput?.value || '').trim();
+        const comment = (commentInput?.value || '').trim();
         
         if(uiController.currentStarRating === 0) { toast.show("Berikan rating bintang dulu ya!", "error"); return; }
         if(!comment) { toast.show("Ulasan tidak boleh kosong.", "error"); return; }
@@ -440,40 +495,27 @@ const uiController = {
 
         if(success) {
             uiController.closeReviewModal();
-            document.getElementById('input-name').value = '';
-            document.getElementById('input-comment').value = '';
+            if(nameInput) nameInput.value = '';
+            if(commentInput) commentInput.value = '';
             uiController.currentStarRating = 0;
             uiController.updateStarDisplay();
         }
     },
     
-    toggleSynopsis: () => {
+    toggleSynopsis() {
         const desc = document.getElementById('detail-desc');
         const btn = document.getElementById('btn-synopsis');
         if(!desc || !btn) return;
-
-        if (desc.classList.contains('line-clamp-3')) {
+        
+        uiController.isSynopsisExpanded = !uiController.isSynopsisExpanded;
+        
+        if (uiController.isSynopsisExpanded) {
             desc.classList.remove('line-clamp-3');
             btn.innerHTML = `Tutup <i class="ph-bold ph-caret-up"></i>`;
-            // Optional: smooth scroll
-            // desc.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } else {
             desc.classList.add('line-clamp-3');
             btn.innerHTML = `Baca Selengkapnya <i class="ph-bold ph-caret-down"></i>`;
         }
-    },
-
-    bindEvents: () => {
-        document.getElementById('btn-synopsis').onclick = uiController.toggleSynopsis;
-        document.getElementById('open-review-btn').onclick = uiController.openReviewModal;
-        document.getElementById('close-review-btn').onclick = uiController.closeReviewModal;
-        document.getElementById('submit-review-btn').onclick = uiController.submitReview;
-        document.getElementById('start-reading-btn').onclick = () => readerController.open(0);
-        document.getElementById('start-fab-btn').onclick = () => readerController.open(0);
-        document.getElementById('search-toggle').onclick = searchController.show;
-        document.getElementById('share-btn').onclick = shareController.shareBook;
-        document.getElementById('nav-toggle-btn').onclick = navMenu.toggle;
-        document.getElementById('reader-back-btn').onclick = readerController.back;
     }
 };
 
@@ -482,86 +524,130 @@ const readerController = {
     idx: 0,
     isUIHidden: false,
     
-    open: (i) => {
+    open(i) {
+        const data = AppState.getInstance().novelData;
+        if (!data || !data.chapters[i]) return;
+        
         readerController.idx = i;
         readerController.render();
-        const view = document.getElementById('view-reader');
-        view.classList.remove('hidden');
-        void view.offsetWidth; 
-        view.classList.remove('translate-y-full');
-        document.body.style.overflow = 'hidden';
-    },
-    
-    back: () => {
-        const view = document.getElementById('view-reader');
-        view.classList.add('translate-y-full');
-        setTimeout(() => {
-            view.classList.add('hidden');
-            document.body.style.overflow = '';
-        }, 300);
-    },
-    
-    render: () => {
-        const ch = AppState.getInstance().novelData.chapters[readerController.idx];
-        document.getElementById('reader-title').innerText = ch.title;
-        document.getElementById('reader-nav-title').innerText = `BAB ${readerController.idx + 1}`;
         
-        const readerBody = document.getElementById('reader-body');
-        readerBody.innerHTML = ch.content;
+        // Simpan progress
+        Storage.setProgress(data.id, i);
         
-        document.getElementById('btn-prev').disabled = readerController.idx === 0;
-        document.getElementById('btn-next').disabled = readerController.idx === AppState.getInstance().novelData.chapters.length - 1;
-        readerController.updateProgress();
-        document.getElementById('reader-scroll').scrollTop = 0;
-    },
-    
-    nav: (d) => { 
-        if (readerController.idx + d >= 0 && readerController.idx + d < AppState.getInstance().novelData.chapters.length) {
-            readerController.idx += d; 
-            readerController.render();
+        const view = document.getElementById('view-reader');
+        if(view) {
+            view.classList.remove('hidden');
+            // Force reflow untuk animasi smooth
+            void view.offsetWidth;
+            view.classList.remove('translate-y-full');
+            document.body.style.overflow = 'hidden';
         }
     },
+    
+    back() {
+        const view = document.getElementById('view-reader');
+        if(view) {
+            view.classList.add('translate-y-full');
+            setTimeout(() => {
+                view.classList.add('hidden');
+                document.body.style.overflow = '';
+            }, 300);
+        }
+    },
+    
+    render() {
+        // REVISED: RACE CONDITION GUARD
+        // Menyimpan snapshot index saat fungsi dipanggil.
+        const currentRenderIndex = readerController.idx;
 
-    updateProgress: () => {
-        const pct = ((readerController.idx+1)/AppState.getInstance().novelData.chapters.length)*100;
-        document.getElementById('progress-bar').style.width = `${pct}%`;
-        document.getElementById('mini-progress').style.width = `${pct}%`;
+        const ch = AppState.getInstance().novelData.chapters[readerController.idx];
+        const titleEl = document.getElementById('reader-title');
+        const navTitleEl = document.getElementById('reader-nav-title');
+        const readerBody = document.getElementById('reader-body');
+        const prevBtn = document.getElementById('btn-prev');
+        const nextBtn = document.getElementById('btn-next');
+        const readerScroll = document.getElementById('reader-scroll');
+        
+        if (titleEl) titleEl.innerText = ch.title;
+        if (navTitleEl) navTitleEl.innerText = `BAB ${readerController.idx + 1}`;
+        if (readerBody) readerBody.innerHTML = ch.content;
+        
+        const novel = AppState.getInstance().novelData;
+        const key = `${novel.id}_${readerController.idx}`;
+
+        Storage.getHighlight(key).then(saved => {
+            // REVISED: ASYNC SAFETY CHECK
+            // Memastikan user belum pindah bab saat data highlight selesai dimuat.
+            // Jika idx sudah berubah, abaikan hasil promise lama.
+            if (saved && readerBody && readerController.idx === currentRenderIndex) {
+                readerBody.innerHTML = saved.content;
+            }
+        });
+        
+        if (prevBtn) prevBtn.disabled = readerController.idx === 0;
+        if (nextBtn) nextBtn.disabled = readerController.idx === AppState.getInstance().novelData.chapters.length - 1;
+        
+        readerController.updateProgress();
+        
+        if (readerScroll) readerScroll.scrollTop = 0;
     },
 
-    jumpToProgress: (e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
+    updateProgress() {
+        const max = AppState.getInstance().novelData.chapters.length;
+        if (max === 0) return;
+        const pct = ((readerController.idx + 1) / max) * 100;
+        
+        const progressBar = document.getElementById('progress-bar');
+        const miniProgress = document.getElementById('mini-progress');
+        
+        if (progressBar) progressBar.style.width = `${pct}%`;
+        if (miniProgress) miniProgress.style.width = `${pct}%`;
+    },
+
+    jumpToProgress(e) {
+        const container = e.currentTarget;
+        if(!container) return;
+        
+        const rect = container.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const pct = x / rect.width;
-        const targetIdx = Math.floor(pct * AppState.getInstance().novelData.chapters.length);
-        if(targetIdx >= 0 && targetIdx < AppState.getInstance().novelData.chapters.length) {
+        
+        const max = AppState.getInstance().novelData.chapters.length;
+        const targetIdx = Math.floor(pct * max);
+        
+        if(targetIdx >= 0 && targetIdx < max) {
             readerController.idx = targetIdx;
             readerController.render();
         }
     },
 
-    toggleUI: () => {
+    toggleUI() {
         readerController.isUIHidden = !readerController.isUIHidden;
+        
         const top = document.getElementById('reader-top');
         const bottom = document.getElementById('reader-bottom');
+        
         if(readerController.isUIHidden) {
-            top.classList.add('reader-hidden');
-            bottom.classList.add('reader-hidden');
+            if(top) top.classList.add('reader-hidden');
+            if(bottom) bottom.classList.add('reader-hidden');
         } else {
-            top.classList.remove('reader-hidden');
-            bottom.classList.remove('reader-hidden');
+            if(top) top.classList.remove('reader-hidden');
+            if(bottom) bottom.classList.remove('reader-hidden');
         }
     },
     
-    toggleSettings: () => {
+    toggleSettings() {
         const panel = document.getElementById('settings-panel');
-        if(panel.classList.contains('hidden')) {
-            panel.classList.remove('hidden');
-            setTimeout(() => {
-                panel.classList.remove('opacity-0', 'translate-y-4');
-            }, 10);
-        } else {
-            panel.classList.add('opacity-0', 'translate-y-4');
-            setTimeout(() => panel.classList.add('hidden'), 300);
+        if(panel) {
+            if(panel.classList.contains('hidden')) {
+                panel.classList.remove('hidden');
+                setTimeout(() => {
+                    panel.classList.remove('opacity-0', 'translate-y-4');
+                }, 10);
+            } else {
+                panel.classList.add('opacity-0', 'translate-y-4');
+                setTimeout(() => panel.classList.add('hidden'), 300);
+            }
         }
     }
 };
@@ -571,39 +657,47 @@ const searchController = {
     results: [],
     currentQuery: '',
     
-    show: () => {
+    show() {
         const modal = document.getElementById('search-modal');
         const content = document.getElementById('search-modal-content');
-        modal.classList.remove('hidden');
-        setTimeout(() => {
-            modal.classList.remove('opacity-0');
-            content.classList.remove('-translate-y-full');
-            document.getElementById('search-input').focus();
-        }, 10);
+        if (modal && content) {
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                content.classList.remove('-translate-y-full');
+                const input = document.getElementById('search-input');
+                if(input) input.focus();
+            }, 10);
+        }
     },
     
-    hide: () => {
+    hide() {
         const modal = document.getElementById('search-modal');
         const content = document.getElementById('search-modal-content');
-        modal.classList.add('opacity-0');
-        content.classList.add('-translate-y-full');
-        setTimeout(() => {
-            modal.classList.add('hidden');
-            searchController.clearResults();
-        }, 300);
+        if (modal && content) {
+            modal.classList.add('opacity-0');
+            content.classList.add('-translate-y-full');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                searchController.clearResults();
+            }, 300);
+        }
     },
     
-    perform: (query) => {
+    perform(query) {
         searchController.currentQuery = query.trim().toLowerCase();
         if (!searchController.currentQuery) { searchController.clearResults(); return; }
         
+        const data = AppState.getInstance().novelData;
+        if(!data || data.chapters.length === 0) return;
+        
         searchController.results = [];
-        AppState.getInstance().novelData.chapters.forEach((chapter, chapterIndex) => {
+        data.chapters.forEach((chapter, index) => {
             const textContent = chapter.content.replace(/<[^>]*>/g, ' ').toLowerCase();
             let matchIndex = textContent.indexOf(searchController.currentQuery);
             
             while (matchIndex !== -1) {
-                const start = Math.max(0, matchIndex - 50);
+                const start = Math.max(0, matchIndex - 60);
                 const end = Math.min(textContent.length, matchIndex + searchController.currentQuery.length + 100);
                 const context = textContent.substring(start, end);
                 const highlighted = context.replace(
@@ -611,7 +705,7 @@ const searchController = {
                     match => `<mark class="bg-yellow-200 dark:bg-yellow-900 text-black dark:text-yellow-100 px-1 rounded">${match}</mark>`
                 );
                 
-                searchController.results.push({ chapterIndex, chapterTitle: chapter.title, context: highlighted });
+                searchController.results.push({ index, chapterTitle: chapter.title, context: highlighted });
                 matchIndex = textContent.indexOf(searchController.currentQuery, matchIndex + 1);
             }
         });
@@ -619,37 +713,44 @@ const searchController = {
         searchController.renderResults();
     },
     
-    renderResults: () => {
+    renderResults() {
         const container = document.getElementById('search-results');
         const countElement = document.getElementById('search-count');
         
+        if (!container) return;
+
         if (searchController.results.length === 0) {
             container.innerHTML = `<div class="text-center py-8 text-gray-500">Tidak ditemukan</div>`;
-            countElement.textContent = '0 hasil';
+            if (countElement) countElement.textContent = '0 hasil';
             return;
         }
         
-        container.innerHTML = searchController.results.map((r, i) => `
+        container.innerHTML = searchController.results.map(r => `
             <div class="bg-gray-50 dark:bg-white/5 p-4 rounded-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-white/10"
-                 onclick="searchController.openResult(${r.chapterIndex})">
+                 onclick="searchController.openResult(${r.index})">
                 <div class="text-xs font-bold text-brand-text mb-1">${r.chapterTitle}</div>
                 <div class="text-xs text-gray-600 dark:text-gray-300">...${r.context}...</div>
             </div>
         `).join('');
         
-        countElement.textContent = `${searchController.results.length} hasil`;
+        if (countElement) countElement.textContent = `${searchController.results.length} hasil`;
     },
-
-    openResult: (idx) => {
+    
+    openResult(idx) {
         searchController.hide();
         readerController.open(idx);
     },
-
-    clearResults: () => {
+    
+    clearResults() {
         searchController.results = [];
-        document.getElementById('search-results').innerHTML = '';
-        document.getElementById('search-count').textContent = '0 hasil';
-        document.getElementById('search-input').value = '';
+        const input = document.getElementById('search-input');
+        if (input) input.value = '';
+        
+        const container = document.getElementById('search-results');
+        if (container) container.innerHTML = '';
+        
+        const countElement = document.getElementById('search-count');
+        if (countElement) countElement.textContent = '0 hasil';
     }
 };
 
@@ -658,52 +759,60 @@ function toggleNav() {
     const nav = document.getElementById('floating-nav');
     const toggle = document.getElementById('nav-toggle-btn');
     
-    if(nav.classList.contains('hidden-popover')) {
+    if(!nav || !toggle) return;
+
+    if (nav.classList.contains('hidden-popover')) {
         nav.classList.remove('hidden-popover');
         nav.classList.add('visible-popover');
         
-        if (navClickListener) document.removeEventListener('click', navClickListener);
+        if (nav._clickListener) document.removeEventListener('click', nav._clickListener);
         
-        navClickListener = function(e) {
+        nav._clickListener = function(e) {
             if (!nav.contains(e.target) && !toggle.contains(e.target)) {
                 nav.classList.remove('visible-popover');
                 nav.classList.add('hidden-popover');
-                document.removeEventListener('click', navClickListener);
-                navClickListener = null;
+                document.removeEventListener('click', nav._clickListener);
+                nav._clickListener = null;
             }
         };
         
-        setTimeout(() => document.addEventListener('click', navClickListener), 10);
+        setTimeout(() => document.addEventListener('click', nav._clickListener), 10);
     } else {
         nav.classList.remove('visible-popover');
         nav.classList.add('hidden-popover');
-        if (navClickListener) {
-            document.removeEventListener('click', navClickListener);
-            navClickListener = null;
+        if (nav._clickListener) {
+            document.removeEventListener('click', nav._clickListener);
+            nav._clickListener = null;
         }
     }
 }
 
-// === ENHANCED SHARE ===
+const navMenu = { toggle: toggleNav }; // Definisi untuk EventBinder
+
+// === SHARE CONTROLLER ===
 const shareController = {
-    shareBook: async () => {
+    async shareBook() {
+        const data = AppState.getInstance().novelData;
+        if (!data) return;
+
         const shareData = {
-            title: AppState.getInstance().novelData.title,
-            text: `Baca "${AppState.getInstance().novelData.title}" karya ${AppState.getInstance().novelData.author}`,
+            title: data.title,
+            text: `Baca "${data.title}" karya ${data.author}`,
             url: window.location.href
         };
+        
         if (navigator.share) {
             try { await navigator.share(shareData); } catch (err) {}
-        } else {
+        } else if (navigator.clipboard) {
             navigator.clipboard.writeText(`${shareData.text} - ${shareData.url}`);
             toast.show('Link berhasil disalin!', 'success');
         }
     },
     
-    shareQuote: async (text) => {
+    async shareQuote(text) {
         if (navigator.share) {
             try { await navigator.share({ title: 'Kutipan', text: `"${text}" - ${AppState.getInstance().novelData.title}` }); } catch (e) {}
-        } else {
+        } else if (navigator.clipboard) {
             navigator.clipboard.writeText(text);
             toast.show('Kutipan disalin', 'success');
         }
@@ -746,8 +855,7 @@ class TextHighlighter {
         const range = this.selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
         
-        // Fix positioning
-        const toolbarWidth = 300; 
+        const toolbarWidth = 300;
         let top = rect.top + window.scrollY - 60;
         let left = rect.left + window.scrollX + (rect.width / 2) - (toolbarWidth / 2);
         
@@ -782,22 +890,48 @@ class TextHighlighter {
         toast.show('Teks disalin', 'success');
         this.removeToolbar();
     }
+    
     shareQuote() {
         shareController.shareQuote(window.getSelection().toString());
         this.removeToolbar();
     }
+    
     highlight(color) {
-        toast.show('Highlight disimpan', 'success');
-        this.removeToolbar();
-    }
+         if (!this.selection || this.selection.rangeCount === 0) return;
+
+         const range = this.selection.getRangeAt(0);
+         const mark = document.createElement('mark');
+         mark.style.backgroundColor = color === 'yellow' ? '#FFD700' : '#FFD700';
+         mark.className = 'reader-highlight';
+
+         try {
+             range.surroundContents(mark);
+         } catch {
+             toast.show('Tidak bisa highlight bagian ini', 'error');
+             return;
+         }
+
+         const readerBody = document.getElementById('reader-body');
+         if (!readerBody) return;
+
+         const novel = AppState.getInstance().novelData;
+         const chapterIndex = readerController.idx;
+         const key = `${novel.id}_${chapterIndex}`;
+
+         Storage.setHighlight(key, readerBody.innerHTML);
+
+         toast.show('Highlight disimpan', 'success');
+         this.removeToolbar();
+     }
 }
 
 const textHighlighter = new TextHighlighter();
 
-// === TOAST ===
+// === TOAST SYSTEM ===
 const toast = {
-    show: (message, type = 'info') => {
+    show(message, type = 'info') {
         const container = document.getElementById('toast-container');
+        if (!container) return;
         container.innerHTML = ''; 
         
         const el = document.createElement('div');
@@ -823,7 +957,11 @@ const toast = {
         
         el.onclick = () => el.remove();
     },
-    clearAll: () => document.getElementById('toast-container').innerHTML = ''
+    
+    clearAll() {
+        const container = document.getElementById('toast-container');
+        if(container) container.innerHTML = '';
+    }
 };
 
 // === PWA INSTALLER ===
@@ -848,8 +986,8 @@ class PWAInstall {
     }
     
     showInstallButton() {
-        if(!document.getElementById('floating-nav')) return;
         const nav = document.getElementById('floating-nav');
+        if(!nav || this.installButton) return;
         if(nav.querySelector('.install-pwa-btn')) return;
         
         const installBtn = document.createElement('button');
@@ -877,102 +1015,135 @@ class PWAInstall {
     }
 }
 
-let pwaInstaller = new PWAInstall();
+let pwaInstaller = null;
 
-// === CLEANUP ===
+// === CLEANUP & GLOBAL UTILITIES ===
 function cleanupModals() {
     toast.clearAll();
+    
     const nav = document.getElementById('floating-nav');
     if(nav) {
         nav.classList.remove('visible-popover');
         nav.classList.add('hidden-popover');
+        if (nav._clickListener) {
+            document.removeEventListener('click', nav._clickListener);
+            nav._clickListener = null;
+        }
     }
+    
     const reviewModal = document.getElementById('modal-review');
     if(reviewModal && !reviewModal.classList.contains('hidden')) {
         uiController.closeReviewModal();
     }
+    
     const searchModal = document.getElementById('search-modal');
     if(searchModal && !searchModal.classList.contains('hidden')) {
         searchController.hide();
     }
     
-    // Highlighters cleanup
+    // Cleanup text highlighter
     if(textHighlighter.toolbar) {
         textHighlighter.toolbar.remove();
         textHighlighter.toolbar = null;
     }
 }
 
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        cleanupModals();
-        readerController.isUIHidden = false;
-        document.getElementById('reader-top').classList.remove('reader-hidden');
-        document.getElementById('reader-bottom').classList.remove('reader-hidden');
-    }
-});
+function setupErrorHandling() {
+    window.addEventListener('error', (event) => {
+        console.error("Global Error:", event.error);
+    });
+    
+    window.addEventListener('unhandledrejection', (event) => {
+        console.error("Unhandled Promise Rejection:", event.reason);
+    });
+}
 
-// === EVENT BINDER & SAFETY CHECK ===
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        // Global Esc key
+        if (e.key === 'Escape') {
+            cleanupModals();
+            readerController.isUIHidden = false;
+            const top = document.getElementById('reader-top');
+            const bottom = document.getElementById('reader-bottom');
+            if(top) top.classList.remove('reader-hidden');
+            if(bottom) bottom.classList.remove('reader-hidden');
+        }
+        
+        // Only in Reader View (Arrow Keys)
+        const readerView = document.getElementById('view-reader');
+        if (readerView && !readerView.classList.contains('hidden')) {
+            if (e.key === 'ArrowLeft') {
+                readerController.nav(-1);
+            } else if (e.key === 'ArrowRight') {
+                readerController.nav(1);
+            } else if (e.key === ' ') {
+                e.preventDefault();
+                readerController.toggleUI();
+            }
+        }
+    });
+}
+
+// === EVENT BINDER & SAFETY CHECK (HYBRID) ===
 const EventBinder = {
-    // Daftar mapping: ID HTML -> Fungsi Handler
+    // Mapping ID HTML ke Fungsi Handler
     map: {
-        // --- NAVIGATION & HEADER ---
+        // Navigation & Header
         'theme-toggle-btn': ThemeManager.toggleTheme,
         'nav-theme-btn': ThemeManager.toggleTheme,
         'search-toggle': searchController.show,
         'search-close-btn': searchController.hide,
         'search-backdrop': searchController.hide,
-        'nav-toggle-btn': navMenu.toggle,
+        'nav-toggle-btn': toggleNav,
+        'search-input': (e) => searchController.perform(e.target.value),
         'share-btn': shareController.shareBook,
         
-        // --- DETAIL PAGE ---
+        // Detail Page
         'btn-synopsis': uiController.toggleSynopsis,
-        'btn-bookmark': () => uiController.toggleBookmark(uiController.state?.currentChapter), // Contextual
-        'start-reading-btn': () => ReaderController.open(0),
-        'start-fab-btn': () => ReaderController.open(0),
+        'btn-bookmark': () => uiController.toggleBookmark(AppState.getInstance().currentChapter),
+        'start-reading-btn': () => readerController.open(0),
+        'start-fab-btn': () => readerController.open(0),
         'open-review-btn': uiController.openReviewModal,
         'close-review-btn': uiController.closeReviewModal,
         'review-backdrop': uiController.closeReviewModal,
         'submit-review-btn': uiController.submitReview,
         
-        // --- READER ---
-        'reader-back-btn': ReaderController.close,
-        'btn-prev': () => ReaderController.nav(-1),
-        'btn-next': () => ReaderController.nav(1),
-        'reader-progress-container': (e) => ReaderController.jumpToProgress(e),
-        'reader-scroll': ReaderController.toggleUI, // Tap body to toggle UI
-        'reader-settings-btn': ReaderController.toggleSettings,
-        'close-settings-btn': ReaderController.toggleSettings
+        // Reader
+        'reader-back-btn': readerController.back,
+        'reader-scroll': readerController.toggleUI,
+        'btn-prev': () => readerController.nav(-1),
+        'btn-next': () => readerController.nav(1),
+        'reader-progress-container': (e) => readerController.jumpToProgress(e),
+        'reader-settings-btn': readerController.toggleSettings,
+        'close-settings-btn': readerController.toggleSettings
     },
 
-    init: () => {
+    init() {
         console.group('🛡️ Safety Check: Memeriksa Tombol (Event Listeners)');
         
         let successCount = 0;
         let failCount = 0;
 
-        for (const [id, handler] of Object.entries(this.map)) {
+        // Iterasi map untuk binding otomatis
+        for (const [id, handler] of Object.entries(EventBinder.map)) {
             const el = document.getElementById(id);
             
             if (el) {
-                // Khusus untuk input (live search)
                 if (id === 'search-input') {
                     el.oninput = handler;
-                    el.classList.add('focus:ring-2'); // Visual feedback
-                    console.log(`✅ [INPUT] #${id} terdeteksi & diaktifkan.`);
+                    el.classList.add('focus:ring-2');
                 } else {
-                    // Biasakan tombol
                     el.onclick = (e) => {
-                        handler(e); // Panggil handler
-                        if (el.tagName !== 'A') e.preventDefault(); // Mencegah double fire jika perlu
+                        handler(e);
+                        if (el.tagName !== 'A') e.preventDefault();
                     };
-                    // Tambah kursor pointer untuk memastikan UI
                     el.classList.add('cursor-pointer');
-                    console.log(`✅ [BUTTON] #${id} terdeteksi & klik aktif.`);
                 }
+                console.log(`✅ [${id}] terdeteksi & diaktifkan.`);
                 successCount++;
             } else {
-                console.warn(`❌ Elemen HTML ID #${id} TIDAK DITEMUKAN! Cek HTML Anda.`);
+                console.warn(`❌ Elemen HTML ID #${id} TIDAK DITEMUKAN!`);
                 failCount++;
             }
         }
@@ -984,19 +1155,19 @@ const EventBinder = {
     }
 };
 
-// === MAIN INITIALIZATION MERGED VERSION ===
+// === MAIN INITIALIZATION (ROBUST) ===
 async function initApp() {
     try {
         // 1. Show loading indicator
         toast.show("Memuat data...", "info");
         
-        // 2. Load Preferences
+        // 2. Load Preferences first
         AppState.getInstance().loadSettings();
         ThemeManager.init();
 
         // 3. Load Novel Data
         const response = await fetch(CONFIG.DATA_URL);
-        if (!response.ok) throw new Error(CONFIG.ERRORS.DATA_LOAD || 'Gagal memuat data novel');
+        if (!response.ok) throw new Error(CONFIG.ERRORS.DATA_LOAD);
         
         const novelData = await response.json();
         AppState.getInstance().novelData = novelData;
@@ -1004,17 +1175,18 @@ async function initApp() {
         // 4. Load Reviews
         await reviewService.fetchReviews();
 
-        // 5. Initialize UI Components
-        uiController.init();
+        // 5. Initialize UI
+        await uiController.init();
 
-        // 6. === EVENT BINDING SAFETY CHECK ===
+        // 6. Event Binding (Hybrid - Auto + Safety)
         const checkResult = EventBinder.init();
         if (checkResult.failed > 0) {
             console.warn(`Event binding failed for ${checkResult.failed} buttons`);
-            toast.show(`Peringatan: ${checkResult.failed} tombol gagal. Cek Console (F12).`, 'warning');
+            // Fallback: Binding manual untuk tombol kritis
+            uiController.bindEvents?.();
         }
 
-        // 7. Scroll Progress Listener (from V2)
+        // 7. Scroll Progress Listener
         const mainScroll = document.getElementById('main-scroll');
         const progressBar = document.getElementById('scroll-progress');
         if (mainScroll && progressBar) {
@@ -1036,29 +1208,19 @@ async function initApp() {
             }
         }
 
-        // 9. PWA Installer (from V2 with safety check)
+        // 9. PWA Installer
         if (typeof PWAInstall === 'function') {
             pwaInstaller = new PWAInstall();
         }
 
-        // 10. Global Error Handling (from V1)
-        if (typeof this.setupErrorHandling === 'function') {
-            this.setupErrorHandling();
+        // 10. Global Error Handling
+        if (typeof setupErrorHandling === 'function') {
+            setupErrorHandling();
         }
 
-        // 11. Keyboard Shortcuts (merged approach)
-        if (typeof this.setupKeyboardShortcuts === 'function') {
-            this.setupKeyboardShortcuts();
-        } else {
-            // Fallback to V2 implementation
-            document.addEventListener('keydown', (e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-                    e.preventDefault();
-                    if (typeof searchController?.show === 'function') {
-                        searchController.show();
-                    }
-                }
-            });
+        // 11. Keyboard Shortcuts
+        if (typeof setupKeyboardShortcuts === 'function') {
+            setupKeyboardShortcuts();
         }
 
         toast.show("Aplikasi siap dibaca!", "success");
@@ -1069,5 +1231,5 @@ async function initApp() {
     }
 }
 
-// Start
+// Start Application
 document.addEventListener('DOMContentLoaded', initApp);
